@@ -32,7 +32,7 @@ start() {
   need_root
   if [ ${#PASS} -lt 8 ]; then echo "Password must be >= 8 chars."; exit 1; fi
   echo "Installing hostapd + dnsmasq…"
-  apt-get install -y -qq hostapd dnsmasq iw >/dev/null 2>&1
+  apt-get install -y -qq hostapd dnsmasq iw iptables >/dev/null 2>&1
 
   # channel of the current Wi-Fi link (AP must match on a single radio)
   local freq ch
@@ -63,21 +63,34 @@ rsn_pairwise=CCMP
 wpa_passphrase=$PASS
 EOF
 
+  # port=0 disables dnsmasq's DNS server so it can't clash with the system
+  # resolver on port 53; it still serves DHCP. bind-dynamic binds only to ap0.
   cat >/tmp/flybox_dnsmasq.conf <<EOF
 interface=$AP_IF
-bind-interfaces
+bind-dynamic
+port=0
 dhcp-range=192.168.60.10,192.168.60.100,255.255.255.0,24h
+dhcp-option=3,$AP_IP
+dhcp-option=6,1.1.1.1,8.8.8.8
 EOF
 
-  # let hotspot clients reach the internet through the STA link
+  # let hotspot clients reach the internet through the STA link (optional)
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
-  iptables -t nat -C POSTROUTING -o "$UP_IF" -j MASQUERADE 2>/dev/null \
-    || iptables -t nat -A POSTROUTING -o "$UP_IF" -j MASQUERADE
+  if command -v iptables >/dev/null 2>&1; then
+    iptables -t nat -C POSTROUTING -o "$UP_IF" -j MASQUERADE 2>/dev/null \
+      || iptables -t nat -A POSTROUTING -o "$UP_IF" -j MASQUERADE
+  else
+    echo "  (iptables missing — clients reach the app, but not the internet via Pi)"
+  fi
 
+  # clear anything already holding the DHCP port / ap0, incl. the system dnsmasq
+  systemctl stop dnsmasq 2>/dev/null
   pkill -f flybox_dnsmasq 2>/dev/null
   pkill -f flybox_hostapd 2>/dev/null
   sleep 1
-  dnsmasq -C /tmp/flybox_dnsmasq.conf -x /tmp/flybox_dnsmasq.pid
+  dnsmasq -C /tmp/flybox_dnsmasq.conf -x /tmp/flybox_dnsmasq.pid \
+    && echo "  DHCP server started (clients will get 192.168.60.x)" \
+    || echo "  WARNING: dnsmasq failed to start — clients won't get an IP"
   hostapd -B /tmp/flybox_hostapd.conf
 
   echo
@@ -91,7 +104,7 @@ stop() {
   need_root
   pkill -f flybox_hostapd 2>/dev/null
   pkill -f flybox_dnsmasq 2>/dev/null
-  iptables -t nat -D POSTROUTING -o "$UP_IF" -j MASQUERADE 2>/dev/null
+  command -v iptables >/dev/null 2>&1 && iptables -t nat -D POSTROUTING -o "$UP_IF" -j MASQUERADE 2>/dev/null
   iw dev "$AP_IF" del 2>/dev/null
   echo "Hotspot stopped."
 }
