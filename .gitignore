@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Recordings (don't sync video to git)
+flybox/recordings/
+*.h264
+*.mp4
+
+# Reference photos (large; not needed on the Pi)
+*.jpeg
+*.jpg
+
+# OS
+.DS_Store

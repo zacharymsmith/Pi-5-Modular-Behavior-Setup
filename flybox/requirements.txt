@@ -1,0 +1,17 @@
+# Web service
+fastapi
+uvicorn[standard]
+pydantic
+
+# Hardware (Pi 5) — installed on the Pi; safe to omit when developing off-Pi
+rpi-hardware-pwm            # true RP1 hardware PWM -> PicoBuck opto pulses
+adafruit-circuitpython-pca9685   # PCA9685 illumination
+adafruit-blinka            # board/busio backing for CircuitPython libs on the Pi
+
+# picamera2 is NOT pip-installed here — install via apt on the Pi:
+#   sudo apt install -y python3-picamera2
+# and run uvicorn with the system Python so it can import picamera2.
+
+# Closed-loop (Phase 4)
+opencv-python-headless
+numpy
