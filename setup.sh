@@ -46,8 +46,10 @@ if [ "$MODE" != "check" ]; then
   echo
   info "Installing system packages (may prompt for your password)"
   sudo apt-get update -qq
+  # numpy + opencv come from apt (NOT pip) so they match picamera2's ABI.
   sudo apt-get install -y -qq python3-picamera2 python3-pip i2c-tools \
-       python3-libcamera git >/dev/null && ok "apt packages installed" \
+       python3-libcamera python3-numpy python3-opencv git >/dev/null \
+       && ok "apt packages installed" \
        || warn "apt install had problems — see output above"
 
   echo
@@ -75,13 +77,12 @@ fi
 echo
 info "Hardware checks"
 
-# Hardware PWM (RP1 = pwmchip2 on Pi 5)
+# Hardware PWM — opto runs via the PCA9685 now, so this is informational only.
+# (Only matters if you later rewire the PicoBuck inputs to GPIO18/19.)
 if [ -d /sys/class/pwm/pwmchip2 ]; then
-  ok "hardware PWM present (/sys/class/pwm/pwmchip2)"
-elif [ -d /sys/class/pwm/pwmchip0 ]; then
-  warn "pwmchip0 found but not pwmchip2 — on Pi 5 the RP1 chip should be pwmchip2. Reboot after enabling dtoverlay=pwm."
+  ok "hardware PWM present (pwmchip2) — available if you ever rewire opto to GPIO"
 else
-  warn "no PWM chip yet — add 'dtoverlay=pwm' and reboot (this script did that if it was missing)."
+  echo "  · hardware PWM (pwmchip2) not active — not needed; opto runs via PCA9685"
 fi
 
 # I2C + PCA9685 at 0x40

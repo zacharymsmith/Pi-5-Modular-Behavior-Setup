@@ -59,6 +59,7 @@
         <div><label>Burst duration (s)</label><input id="train" type="number" value="2" min="0"></div>
         <div><label>Rest between (s)</label><input id="rest" type="number" value="5" min="0"></div>
         <div><label># Bursts</label><input id="reps" type="number" value="5" min="1"></div>
+        <div><label>Intensity (0–1)</label><input id="intensity" type="number" value="1" min="0" max="1" step="0.05"></div>
         <div style="align-self:end"><small id="duty">duty: —</small></div>
       </div>
       <div class="row">
@@ -98,7 +99,7 @@ function updateDuty(){
 
 function proto(){ return {frequency_hz:+$('freq').value, pulse_width_ms:+$('pw').value,
   train_duration_s:+$('train').value, rest_s:+$('rest').value, n_bursts:+$('reps').value,
-  channel:$('channel').value}; }
+  channel:$('channel').value, intensity:+$('intensity').value}; }
 
 async function runOpto(){ const r=await post('/api/opto/run', proto());
   if(!r.ok) $('status').textContent = '⚠ ' + r.error; }

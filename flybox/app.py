@@ -32,7 +32,8 @@ class ProtocolIn(BaseModel):
     train_duration_s: float = 2.0
     rest_s: float = 5.0
     n_bursts: int = 5
-    channel: str = "blue_left"
+    channel: str = "red"
+    intensity: float = 1.0
 
 
 class LightIn(BaseModel):
