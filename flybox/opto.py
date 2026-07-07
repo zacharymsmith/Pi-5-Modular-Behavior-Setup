@@ -1,13 +1,8 @@
-"""Optogenetic pulse trains via the shared PCA9685 (ch2 red / ch3 blue).
+"""Optogenetic pulse trains via the shared PCA9685 — per channel, concurrent.
 
-The PicoBuck PWM inputs are wired to the PCA9685, so opto is driven over I2C. We
-gate the channel fully ON/OFF in software to build the pulse train (leaving the
-PCA9685 carrier free for flicker-free strip dimming); the "ON" level sets LED
-intensity.
-
-Timing: software/I2C gating has ~1-few ms jitter, fine for typical opto pulses.
-Parameterization: frequency_hz, pulse_width_ms, train_duration_s, rest_s,
-n_bursts, intensity.
+Each channel (red, blue) has its own worker thread and state, so red and blue can
+stimulate independently and simultaneously (e.g. different trigger zones). Pulse
+trains are software-gated ON/OFF; the "ON" level sets intensity.
 """
 from __future__ import annotations
 
@@ -52,75 +47,103 @@ class Protocol:
         return None
 
 
+class _Chan:
+    def __init__(self):
+        self.thread: threading.Thread | None = None
+        self.stop = threading.Event()
+        self.running = False
+        self.message = "idle"
+
+
 class OptoController:
     def __init__(self):
-        self._thread: threading.Thread | None = None
-        self._stop = threading.Event()
-        self.state = {"running": False, "message": "idle", "hw": pca.hw}
+        self._chan = {name: _Chan() for name in OPTO_CHANNELS}
 
-    def _set(self, channel: str, level: float):
-        pca.set(OPTO_CHANNELS[channel], level)
-
+    # ---- public API ----------------------------------------------------
     def run(self, proto: Protocol) -> str | None:
         err = proto.validate()
         if err:
             return err
-        if self.state["running"]:
-            return "A protocol is already running."
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run_protocol, args=(proto,), daemon=True)
-        self._thread.start()
+        c = self._chan[proto.channel]
+        if c.running:
+            return f"{proto.channel} is already running."
+        c.stop.clear()
+        c.thread = threading.Thread(target=self._run, args=(proto, c), daemon=True)
+        c.thread.start()
         return None
 
-    def _run_protocol(self, proto: Protocol):
-        self.state.update(running=True, message="running", protocol=asdict(proto))
+    def is_running(self, channel: str) -> bool:
+        c = self._chan.get(channel)
+        return bool(c and c.running)
+
+    def stop(self, channel: str | None = None):
+        names = [channel] if channel else list(self._chan)
+        for n in names:
+            c = self._chan[n]
+            c.stop.set()
+            pca.set(OPTO_CHANNELS[n], 0.0)
+            c.running = False
+            c.message = "stopped"
+
+    def cleanup(self):
+        self.stop()
+
+    @property
+    def state(self):
+        chans = {n: {"running": c.running, "message": c.message}
+                 for n, c in self._chan.items()}
+        running = [n for n, c in self._chan.items() if c.running]
+        return {
+            "hw": pca.hw,
+            "running": bool(running),
+            "message": ("; ".join(f"{n}: {self._chan[n].message}" for n in running)
+                        if running else "idle"),
+            "channels": chans,
+        }
+
+    # ---- worker --------------------------------------------------------
+    def _run(self, proto: Protocol, c: _Chan):
+        c.running = True
+        c.message = "running"
+        ch = proto.channel
         try:
             for i in range(1, proto.n_bursts + 1):
-                if self._stop.is_set():
+                if c.stop.is_set():
                     break
-                self.state["message"] = f"burst {i}/{proto.n_bursts}: stimulating"
-                self._pulse_train(proto)
-                self._set(proto.channel, 0.0)
-                if i < proto.n_bursts and not self._stop.is_set():
-                    self.state["message"] = f"burst {i}/{proto.n_bursts}: resting"
-                    self._sleep(proto.rest_s)
+                c.message = f"burst {i}/{proto.n_bursts}: stim"
+                self._pulse_train(proto, c)
+                pca.set(OPTO_CHANNELS[ch], 0.0)
+                if i < proto.n_bursts and not c.stop.is_set():
+                    c.message = f"burst {i}/{proto.n_bursts}: rest"
+                    self._sleep(proto.rest_s, c)
         finally:
-            self._set(proto.channel, 0.0)
-            self.state.update(running=False,
-                              message="aborted" if self._stop.is_set() else "complete")
+            pca.set(OPTO_CHANNELS[ch], 0.0)
+            c.running = False
+            c.message = "aborted" if c.stop.is_set() else "complete"
 
-    def _pulse_train(self, proto: Protocol):
-        ch = proto.channel
-        if proto.frequency_hz <= 0:  # continuous ON for the burst
-            self._set(ch, proto.intensity)
-            self._sleep(proto.train_duration_s)
-            self._set(ch, 0.0)
+    def _pulse_train(self, proto: Protocol, c: _Chan):
+        ch = OPTO_CHANNELS[proto.channel]
+        if proto.frequency_hz <= 0:
+            pca.set(ch, proto.intensity)
+            self._sleep(proto.train_duration_s, c)
+            pca.set(ch, 0.0)
             return
         on_s = proto.pulse_width_ms / 1000.0
         off_s = (proto.period_ms() - proto.pulse_width_ms) / 1000.0
         end = time.perf_counter() + proto.train_duration_s
-        while time.perf_counter() < end and not self._stop.is_set():
-            self._set(ch, proto.intensity)
-            self._sleep(on_s)
-            self._set(ch, 0.0)
-            self._sleep(off_s)
+        while time.perf_counter() < end and not c.stop.is_set():
+            pca.set(ch, proto.intensity)
+            self._sleep(on_s, c)
+            pca.set(ch, 0.0)
+            self._sleep(off_s, c)
 
-    def _sleep(self, seconds: float):
+    def _sleep(self, seconds: float, c: _Chan):
         end = time.perf_counter() + seconds
         while True:
             remaining = end - time.perf_counter()
-            if remaining <= 0 or self._stop.is_set():
+            if remaining <= 0 or c.stop.is_set():
                 return
             time.sleep(min(remaining, 0.005))
-
-    def stop(self):
-        self._stop.set()
-        for name in OPTO_CHANNELS:
-            self._set(name, 0.0)
-        self.state.update(running=False, message="stopped by user")
-
-    def cleanup(self):
-        self.stop()
 
 
 controller = OptoController()

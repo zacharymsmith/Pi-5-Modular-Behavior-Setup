@@ -61,11 +61,22 @@ class LoopIn(BaseModel):
     cooldown_s: float | None = None
 
 
-class RoiIn(BaseModel):
+class ZoneIn(BaseModel):
     nx1: float
     ny1: float
     nx2: float
     ny2: float
+    channel: str = "red"
+
+
+class ZoneRemoveIn(BaseModel):
+    id: int
+
+
+class ProximityIn(BaseModel):
+    enabled: bool | None = None
+    distance_px: int | None = None
+    channel: str | None = None
 
 
 # --- UI + stream -----------------------------------------------------------
@@ -163,22 +174,41 @@ def set_loop(l: LoopIn):
     return {"ok": True, "loop": loop.status()}
 
 
-@app.post("/api/loop/roi")
-def set_roi(r: RoiIn):
-    loop.set_roi(r.nx1, r.ny1, r.nx2, r.ny2)
+@app.post("/api/loop/zone")
+def add_zone(z: ZoneIn):
+    zid = loop.add_zone(z.nx1, z.ny1, z.nx2, z.ny2, z.channel)
+    return {"ok": True, "id": zid, "loop": loop.status()}
+
+
+@app.post("/api/loop/zone/remove")
+def remove_zone(z: ZoneRemoveIn):
+    loop.remove_zone(z.id)
     return {"ok": True, "loop": loop.status()}
 
 
-@app.post("/api/loop/clear_roi")
-def clear_roi():
-    loop.clear_roi()
+@app.post("/api/loop/zones/clear")
+def clear_zones():
+    loop.clear_zones()
     return {"ok": True}
+
+
+@app.post("/api/loop/proximity")
+def set_proximity(p: ProximityIn):
+    loop.set_proximity(p.enabled, p.distance_px, p.channel)
+    return {"ok": True, "loop": loop.status()}
 
 
 @app.post("/api/loop/protocol")
 def set_loop_protocol(p: ProtocolIn):
-    loop.protocol = Protocol(**p.dict())
+    """Set the protocol fired for one channel (p.channel = 'red' or 'blue')."""
+    loop.set_protocol(Protocol(**p.dict()))
     return {"ok": True, "loop": loop.status()}
+
+
+@app.post("/api/camera/retry")
+def camera_retry():
+    msg = camera.reinit()
+    return {"ok": camera.hw, "hw": camera.hw, "message": msg}
 
 
 @app.on_event("shutdown")

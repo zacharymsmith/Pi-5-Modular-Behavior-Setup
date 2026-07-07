@@ -34,7 +34,9 @@ except Exception as e:  # pragma: no cover
 
 class Camera:
     def __init__(self):
-        self.hw = _HW_CAM
+        self.hw = False
+        self._cam = None
+        self.message = ""
         self._cond = threading.Condition()
         self._jpeg = None            # latest preview JPEG bytes
         self._frame = None           # latest raw BGR frame (for on-demand grabs)
@@ -46,26 +48,46 @@ class Camera:
         self.frame_cb = None
         os.makedirs(RECORDING_DIR, exist_ok=True)
 
-        if _HW_CAM:
-            try:
-                self._cam = Picamera2()
-                cfg = self._cam.create_video_configuration(
-                    main={"size": PROCESS_SIZE, "format": "RGB888"},
-                    controls={"FrameRate": CAMERA_FPS},
-                )
-                self._cam.configure(cfg)
-                self._cam.start()
-                self.message = f"Picamera2 {PROCESS_SIZE[0]}x{PROCESS_SIZE[1]}"
-            except Exception as e:
-                self.hw = False
-                self._cam = None
-                self.message = f"camera error, using mock ({e})"
-        else:
-            self._cam = None
-            self.message = f"mock camera ({_IMPORT_ERR})"
-
+        self._open()
         self._t = threading.Thread(target=self._loop, daemon=True)
         self._t.start()
+
+    def _open(self):
+        """Try to open the real camera; fall back to mock with a clear reason."""
+        if not _HW_CAM:
+            self.hw = False
+            self._cam = None
+            self.message = f"mock — picamera2 not importable ({_IMPORT_ERR})"
+            return
+        try:
+            cam = Picamera2()
+            cfg = cam.create_video_configuration(
+                main={"size": PROCESS_SIZE, "format": "RGB888"},
+                controls={"FrameRate": CAMERA_FPS},
+            )
+            cam.configure(cfg)
+            cam.start()
+            self._cam = cam
+            self.hw = True
+            self.message = f"live · Picamera2 {PROCESS_SIZE[0]}x{PROCESS_SIZE[1]}"
+        except Exception as e:
+            self.hw = False
+            self._cam = None
+            # most common cause: another process already owns the camera
+            self.message = f"mock — camera busy/unavailable: {e}"
+
+    def reinit(self):
+        """Release any handle and try to open the camera again (no app restart)."""
+        try:
+            if self._cam is not None:
+                self._cam.stop()
+                self._cam.close()
+        except Exception:
+            pass
+        self._cam = None
+        self.hw = False
+        self._open()
+        return self.message
 
     # ---- capture loop --------------------------------------------------
     def _grab(self):
@@ -114,13 +136,15 @@ class Camera:
                 time.sleep(0.05)  # keep the loop alive no matter what
 
     def _mock_frame(self):
-        """Light background with a dark blob orbiting — exercises the tracker."""
+        """Light background with TWO dark blobs orbiting — exercises the tracker,
+        multi-zone triggers, and the proximity trigger (they periodically cross)."""
         w, h = PROCESS_SIZE
         img = np.full((h, w, 3), 200, np.uint8)
         t = time.time()
-        cx = int(w / 2 + (w / 3) * np.cos(t))
-        cy = int(h / 2 + (h / 3) * np.sin(t * 1.3))
-        cv2.circle(img, (cx, cy), 14, (30, 30, 30), -1)
+        cx1 = int(w / 2 + (w / 3) * np.cos(t));       cy1 = int(h / 2 + (h / 3) * np.sin(t * 1.3))
+        cx2 = int(w / 2 + (w / 3) * np.cos(t + 2.2)); cy2 = int(h / 2 + (h / 3) * np.sin(t * 1.1 + 1.0))
+        cv2.circle(img, (cx1, cy1), 14, (30, 30, 30), -1)
+        cv2.circle(img, (cx2, cy2), 14, (30, 30, 30), -1)
         return img
 
     # ---- consumers -----------------------------------------------------
