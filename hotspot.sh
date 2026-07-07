@@ -34,13 +34,19 @@ start() {
   echo "Installing hostapd + dnsmasq…"
   apt-get install -y -qq hostapd dnsmasq iw iptables >/dev/null 2>&1
 
-  # channel of the current Wi-Fi link (AP must match on a single radio)
-  local freq ch
+  # The AP must match the STA's channel AND band on a single radio. Detect both.
+  local freq ch hwmode="g" extra=""
   freq=$(iw dev "$UP_IF" link 2>/dev/null | awk '/freq/{print $2; exit}')
-  if [ -n "${freq:-}" ]; then ch=$(( (freq - 2407) / 5 )); else ch=6; fi
-  [ "$ch" -lt 1 ] 2>/dev/null || [ "$ch" -gt 14 ] 2>/dev/null && ch=6
+  if [ -n "${freq:-}" ] && [ "$freq" -ge 5000 ]; then
+    ch=$(( (freq - 5000) / 5 )); hwmode="a"
+    extra=$'ieee80211n=1\ncountry_code=US\nieee80211d=1'
+  elif [ -n "${freq:-}" ] && [ "$freq" -ge 2400 ]; then
+    ch=$(( (freq - 2407) / 5 ))
+  else
+    ch=6
+  fi
 
-  echo "Creating $AP_IF (channel $ch)…"
+  echo "Creating $AP_IF (${hwmode} channel $ch)…"
   iw dev "$AP_IF" del 2>/dev/null
   iw dev "$UP_IF" interface add "$AP_IF" type __ap 2>/dev/null \
     || iw phy phy0 interface add "$AP_IF" type __ap
@@ -53,7 +59,7 @@ start() {
 interface=$AP_IF
 driver=nl80211
 ssid=$SSID
-hw_mode=g
+hw_mode=$hwmode
 channel=$ch
 wmm_enabled=1
 auth_algs=1
@@ -61,6 +67,7 @@ wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 wpa_passphrase=$PASS
+$extra
 EOF
 
   # port=0 disables dnsmasq's DNS server so it can't clash with the system
@@ -94,7 +101,7 @@ EOF
   hostapd -B /tmp/flybox_hostapd.conf
 
   echo
-  echo "Hotspot '$SSID' is up on channel $ch."
+  echo "Hotspot '$SSID' is up (${hwmode}, channel $ch)."
   echo "  Connect a laptop/phone to '$SSID' (password: $PASS)"
   echo "  Then open  http://$AP_IP:8000"
   echo "  Your Pi stays online on $UP_IF for Pi Connect / internet."
