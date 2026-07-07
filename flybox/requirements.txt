@@ -4,8 +4,7 @@ uvicorn[standard]
 pydantic
 
 # Hardware (Pi 5) — installed on the Pi; safe to omit when developing off-Pi
-rpi-hardware-pwm            # true RP1 hardware PWM -> PicoBuck opto pulses
-adafruit-circuitpython-pca9685   # PCA9685 illumination
+adafruit-circuitpython-pca9685   # PCA9685 (strips + opto)
 adafruit-blinka            # board/busio backing for CircuitPython libs on the Pi
 
 # picamera2 is NOT pip-installed here — install via apt on the Pi:

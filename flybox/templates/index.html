@@ -5,127 +5,243 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FlyBox Controller</title>
 <style>
-  :root { --bg:#0f1115; --card:#1a1e26; --line:#2a3140; --fg:#e6e9ef; --muted:#8b93a7;
-          --blue:#4f7cff; --green:#2ec27e; --red:#e5484d; }
-  * { box-sizing:border-box; }
-  body { margin:0; font:15px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
-  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline;}
-  header h1 { font-size:18px; margin:0; }
-  #hw { color:var(--muted); font-size:12px; }
-  main { display:grid; grid-template-columns:minmax(320px,1fr) 1fr; gap:16px; padding:16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
-  .card h2 { margin:0 0 12px; font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
-  img#preview { width:100%; border-radius:8px; background:#000; aspect-ratio:4/3; object-fit:contain; }
-  label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
-  input[type=number] { width:100%; padding:8px; background:#0d1017; border:1px solid var(--line);
-                       border-radius:6px; color:var(--fg); }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  button { cursor:pointer; border:0; border-radius:7px; padding:10px 14px; font-weight:600; color:#fff; }
-  .b-blue{background:var(--blue)} .b-green{background:var(--green)} .b-red{background:var(--red)}
-  .b-ghost{background:#222a38} .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-  .slider{display:flex;align-items:center;gap:10px;margin:8px 0}
-  .slider input{flex:1}
-  #status{font-size:13px;color:var(--muted);white-space:pre-wrap;margin-top:8px}
-  select{padding:8px;background:#0d1017;border:1px solid var(--line);border-radius:6px;color:var(--fg);width:100%}
-  small{color:var(--muted)}
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1b212d; --line:#28303f;
+    --fg:#e8ebf2; --muted:#8a93a6; --accent:#5b8cff; --accent2:#8b5bff;
+    --green:#2fbf71; --amber:#f2a13d; --red:#e5484d; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:
+       radial-gradient(1200px 600px at 70% -10%,#182034 0,var(--bg) 60%);color:var(--fg);min-height:100vh}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);
+         position:sticky;top:0;background:rgba(11,13,18,.85);backdrop-filter:blur(8px);z-index:5}
+  header h1{font-size:17px;margin:0;letter-spacing:.2px}
+  .chips{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+  .chip{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
+        padding:4px 10px;border-radius:999px}
+  .chip b{color:var(--fg);font-weight:600}
+  main{display:grid;grid-template-columns:minmax(420px,1.1fr) 1fr;gap:18px;padding:18px;max-width:1500px;margin:0 auto}
+  @media(max-width:1000px){main{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;
+        box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+  .card h2{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .card .sub{color:var(--muted);font-size:12px;margin:0 0 14px}
+  .previewWrap{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:10px;overflow:hidden}
+  #preview{width:100%;height:100%;object-fit:contain;display:block}
+  #roiCanvas{position:absolute;inset:0;cursor:crosshair}
+  .rowbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+  button{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:9px 14px;font-weight:600;
+         color:var(--fg);background:var(--panel2);transition:.15s}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:linear-gradient(180deg,var(--accent),#3f6fe0);border:0;color:#fff}
+  button.green{background:var(--green);border:0;color:#062a17}
+  button.red{background:var(--red);border:0;color:#fff}
+  button.ghost{background:transparent}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
+  input[type=number],select{width:100%;padding:9px;background:#0e131c;border:1px solid var(--line);
+        border-radius:8px;color:var(--fg)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 12px}
+  .slider{display:flex;align-items:center;gap:12px;margin:10px 0}
+  .slider label{margin:0;width:64px;color:var(--fg)}
+  .slider input[type=range]{flex:1;accent-color:var(--accent)}
+  .slider .val{width:44px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  .switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .switch input{display:none}
+  .track{width:42px;height:24px;background:#2a3346;border-radius:999px;position:relative;transition:.2s}
+  .knob{position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
+  .switch input:checked+.track{background:var(--green)}
+  .switch input:checked+.track .knob{left:21px}
+  .statline{font-size:13px;color:var(--muted);margin-top:10px;min-height:18px}
+  .statline.on{color:var(--green)}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:var(--muted)}
+  .kv b{color:var(--fg);font-weight:600}
+  small.hint{color:var(--muted);font-size:12px}
+  .divider{height:1px;background:var(--line);margin:14px 0}
+  .badge{display:inline-block;width:8px;height:8px;border-radius:50%;background:#556;margin-right:6px}
+  .badge.ok{background:var(--green)} .badge.mock{background:var(--amber)}
 </style>
 </head>
 <body>
 <header>
   <h1>🪰 FlyBox Controller</h1>
-  <span id="hw">connecting…</span>
+  <div class="chips">
+    <span class="chip" id="chipCam">camera —</span>
+    <span class="chip" id="chipPca">PCA9685 —</span>
+    <span class="chip" id="chipFps">— fps</span>
+  </div>
 </header>
+
 <main>
-  <!-- LEFT: camera -->
-  <section class="card">
-    <h2>Camera</h2>
-    <img id="preview" src="/stream.mjpg" alt="live preview">
-    <div class="row">
-      <button class="b-green" onclick="rec(true)">● Record</button>
-      <button class="b-red" onclick="rec(false)">■ Stop</button>
-      <span id="recinfo"><small>not recording</small></span>
-    </div>
-  </section>
+  <!-- LEFT: camera + closed loop -->
+  <div class="col">
+    <section class="card">
+      <h2>Camera</h2>
+      <p class="sub">Drag on the video to set the closed-loop trigger zone.</p>
+      <div class="previewWrap">
+        <img id="preview" src="/stream.mjpg" alt="live preview">
+        <canvas id="roiCanvas"></canvas>
+      </div>
+      <div class="rowbtns">
+        <button class="green" onclick="rec(true)">● Record</button>
+        <button class="red" onclick="rec(false)">■ Stop</button>
+        <span class="statline" id="recinfo">not recording</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Closed-loop stimulation</h2>
+      <p class="sub">When a tracked fly enters the trigger zone, fire the protocol below.</p>
+      <label class="switch"><input type="checkbox" id="loopEn" onchange="setLoop()">
+        <span class="track"><span class="knob"></span></span> Arm closed loop</label>
+      <div class="grid2" style="margin-top:14px">
+        <div><label>Cooldown (s)</label><input id="cooldown" type="number" value="2" min="0" step="0.5" onchange="setLoop()"></div>
+        <div style="align-self:end"><button class="ghost" onclick="clearRoi()">Clear trigger zone</button></div>
+      </div>
+      <div class="divider"></div>
+      <div class="kv"><span>Trigger fires</span><b id="loopProto">—</b></div>
+      <div class="rowbtns"><button onclick="setLoopProtoFromOpto()">Use opto-panel settings as trigger</button></div>
+      <div class="kv" style="margin-top:8px"><span>Fires this session</span><b id="loopFires">0</b></div>
+      <div class="kv"><span>Last fire</span><b id="loopLast">—</b></div>
+    </section>
+  </div>
 
   <!-- RIGHT: controls -->
-  <div style="display:flex;flex-direction:column;gap:16px">
+  <div class="col">
     <section class="card">
       <h2>Optogenetics protocol</h2>
       <label>Channel</label>
       <select id="channel"></select>
-      <div class="grid2">
-        <div><label>Frequency (Hz)</label><input id="freq" type="number" value="20" min="0"></div>
-        <div><label>Pulse width (ms)</label><input id="pw" type="number" value="10" min="0"></div>
-        <div><label>Burst duration (s)</label><input id="train" type="number" value="2" min="0"></div>
-        <div><label>Rest between (s)</label><input id="rest" type="number" value="5" min="0"></div>
-        <div><label># Bursts</label><input id="reps" type="number" value="5" min="1"></div>
-        <div><label>Intensity (0–1)</label><input id="intensity" type="number" value="1" min="0" max="1" step="0.05"></div>
-        <div style="align-self:end"><small id="duty">duty: —</small></div>
+      <div class="grid3" style="margin-top:10px">
+        <div><label>Freq (Hz)</label><input id="freq" type="number" value="20" min="0"></div>
+        <div><label>Pulse (ms)</label><input id="pw" type="number" value="10" min="0"></div>
+        <div><label>Intensity</label><input id="intensity" type="number" value="1" min="0" max="1" step="0.05"></div>
+        <div><label>Burst (s)</label><input id="train" type="number" value="2" min="0"></div>
+        <div><label>Rest (s)</label><input id="rest" type="number" value="5" min="0"></div>
+        <div><label>Bursts</label><input id="reps" type="number" value="5" min="1"></div>
       </div>
-      <div class="row">
-        <button class="b-blue" onclick="runOpto()">▶ Run</button>
-        <button class="b-red" onclick="stopOpto()">⏹ Stop</button>
+      <div class="rowbtns">
+        <button class="primary" onclick="runOpto()">▶ Run</button>
+        <button class="red" onclick="stopOpto()">⏹ Stop</button>
+        <small class="hint" id="duty">duty —</small>
       </div>
-      <div id="status">idle</div>
+      <div class="statline" id="optoStat">idle</div>
+    </section>
+
+    <section class="card">
+      <h2>Tracking</h2>
+      <label class="switch"><input type="checkbox" id="trackEn" onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
+      <div class="slider" style="margin-top:14px">
+        <label>Thresh</label><input id="thresh" type="range" min="0" max="255" value="60" oninput="setTrack()">
+        <span class="val" id="threshVal">60</span>
+      </div>
+      <div class="slider">
+        <label>Min area</label><input id="minarea" type="range" min="1" max="200" value="5" oninput="setTrack()">
+        <span class="val" id="minareaVal">5</span>
+      </div>
+      <label class="switch" style="margin-top:6px"><input type="checkbox" id="invert" checked onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
+      <div class="kv" style="margin-top:12px"><span>Currently tracked</span><b id="trackCount">0</b></div>
     </section>
 
     <section class="card">
       <h2>Illumination</h2>
       <div id="lights"></div>
-      <div class="row"><button class="b-ghost" onclick="lightsOff()">All lights off</button></div>
-      <h2 style="margin-top:16px">Channel discovery</h2>
-      <small>Wiring jumbled? Toggle a raw PCA9685 channel and watch what lights up,
-      then set LIGHT_CHANNELS in config.py.</small>
+      <div class="rowbtns"><button class="ghost" onclick="lightsOff()">All lights off</button></div>
+      <div class="divider"></div>
+      <h2>Channel discovery</h2>
+      <p class="sub">Wiring unknown? Toggle a raw PCA9685 channel and watch what lights up.</p>
       <div class="slider">
-        <span>ch</span><input id="rawch" type="number" value="0" min="0" max="15" style="width:70px">
-        <button class="b-ghost" onclick="raw(1)">On</button>
-        <button class="b-ghost" onclick="raw(0)">Off</button>
+        <label style="width:auto">ch</label>
+        <input id="rawch" type="number" value="0" min="0" max="15" style="width:80px">
+        <button class="ghost" onclick="raw(1)">On</button>
+        <button class="ghost" onclick="raw(0)">Off</button>
       </div>
     </section>
   </div>
 </main>
 
 <script>
-const $ = id => document.getElementById(id);
-const post = (u, b) => fetch(u, {method:'POST', headers:{'Content-Type':'application/json'},
-                                 body: b ? JSON.stringify(b) : null}).then(r=>r.json());
+const $=id=>document.getElementById(id);
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},
+                          body:b?JSON.stringify(b):null}).then(r=>r.json());
 
-function updateDuty(){
-  const f=+$('freq').value, pw=+$('pw').value;
-  const duty = f>0 ? (pw/(1000/f)*100) : 100;
-  $('duty').textContent = 'duty: ' + duty.toFixed(1) + '%' + (duty>100 ? ' ⚠ pulse > period':'');
+// ---- opto ----
+function updateDuty(){const f=+$('freq').value,pw=+$('pw').value;
+  const d=f>0?(pw/(1000/f)*100):100;
+  $('duty').textContent='duty '+d.toFixed(0)+'%'+(d>100?' ⚠ pulse>period':'');}
+['freq','pw'].forEach(id=>$(id).addEventListener('input',updateDuty));
+function protoObj(){return{frequency_hz:+$('freq').value,pulse_width_ms:+$('pw').value,
+  train_duration_s:+$('train').value,rest_s:+$('rest').value,n_bursts:+$('reps').value,
+  channel:$('channel').value,intensity:+$('intensity').value};}
+async function runOpto(){const r=await post('/api/opto/run',protoObj());
+  if(!r.ok)$('optoStat').textContent='⚠ '+r.error;}
+function stopOpto(){post('/api/opto/stop');}
+
+// ---- tracking ----
+function setTrack(){
+  $('threshVal').textContent=$('thresh').value;
+  $('minareaVal').textContent=$('minarea').value;
+  post('/api/track',{enabled:$('trackEn').checked,threshold:+$('thresh').value,
+    invert:$('invert').checked,min_area:+$('minarea').value});
 }
-['freq','pw'].forEach(id=>$(id).addEventListener('input', updateDuty));
 
-function proto(){ return {frequency_hz:+$('freq').value, pulse_width_ms:+$('pw').value,
-  train_duration_s:+$('train').value, rest_s:+$('rest').value, n_bursts:+$('reps').value,
-  channel:$('channel').value, intensity:+$('intensity').value}; }
+// ---- illumination ----
+function setLight(n,v){post('/api/light',{name:n,level:v});}
+function lightsOff(){post('/api/light/off');}
+function raw(on){post('/api/light/raw',{channel:+$('rawch').value,level:on});}
 
-async function runOpto(){ const r=await post('/api/opto/run', proto());
-  if(!r.ok) $('status').textContent = '⚠ ' + r.error; }
-function stopOpto(){ post('/api/opto/stop'); }
-function lightsOff(){ post('/api/light/off'); }
-function raw(on){ post('/api/light/raw', {channel:+$('rawch').value, level:on}); }
-async function rec(on){ const r=await post(on?'/api/record/start':'/api/record/stop');
-  $('recinfo').innerHTML = '<small>'+(on?('recording → '+(r.path||'')):('saved '+(r.path||'')))+'</small>'; }
+// ---- closed loop ----
+function setLoop(){post('/api/loop',{enabled:$('loopEn').checked,cooldown_s:+$('cooldown').value});}
+function clearRoi(){post('/api/loop/clear_roi');}
+function setLoopProtoFromOpto(){post('/api/loop/protocol',protoObj()).then(()=>refresh());}
+async function rec(on){const r=await post(on?'/api/record/start':'/api/record/stop');
+  $('recinfo').textContent=on?('recording → '+(r.path||'')):('saved '+(r.path||''));
+  $('recinfo').className='statline'+(on?' on':'');}
 
-function setLight(name, level){ post('/api/light', {name, level}); }
+// ---- ROI drag on the preview ----
+const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
+function fit(){const r=$('preview').getBoundingClientRect();cv.width=r.width;cv.height=r.height;}
+window.addEventListener('resize',fit);
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+cv.addEventListener('mousedown',e=>{fit();drag=pos(e);});
+cv.addEventListener('mousemove',e=>{if(!drag)return;const p=pos(e);
+  ctx.clearRect(0,0,cv.width,cv.height);ctx.strokeStyle='#f2a13d';ctx.lineWidth=2;
+  ctx.strokeRect(drag.x,drag.y,p.x-drag.x,p.y-drag.y);});
+cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);
+  const nx1=drag.x/cv.width,ny1=drag.y/cv.height,nx2=p.x/cv.width,ny2=p.y/cv.height;
+  drag=null;setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),400);
+  if(Math.abs(nx2-nx1)>0.02&&Math.abs(ny2-ny1)>0.02)
+    post('/api/loop/roi',{nx1,ny1,nx2,ny2}).then(()=>refresh());});
 
+// ---- status polling ----
 let built=false;
-async function poll(){
-  const s = await fetch('/api/status').then(r=>r.json());
-  $('hw').textContent = `cam:${s.camera.message} · opto:${s.opto.message}`;
-  $('status').textContent = s.opto.running ? ('● '+s.opto.message) : s.opto.message;
+async function refresh(){
+  let s;try{s=await fetch('/api/status').then(r=>r.json());}catch(e){return;}
+  const badge=ok=>`<span class="badge ${ok?'ok':'mock'}"></span>`;
+  $('chipCam').innerHTML=badge(s.camera.hw)+'camera <b>'+(s.camera.hw?'live':'mock')+'</b>';
+  $('chipPca').innerHTML=badge(s.opto.hw)+'PCA9685 <b>'+(s.opto.hw?'linked':'mock')+'</b>';
+  $('chipFps').innerHTML='<b>'+(s.camera.fps||0)+'</b> fps';
+  $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
+  $('optoStat').className='statline'+(s.opto.running?' on':'');
+  $('trackCount').textContent=s.tracker.count;
+  $('loopFires').textContent=s.loop.fires;
+  $('loopLast').textContent=s.loop.last_event;
+  const p=s.loop.protocol;
+  $('loopProto').textContent=`${p.channel} · ${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.train_duration_s}s`;
   if(!built){
-    $('channel').innerHTML = s.opto_channels.map(c=>`<option>${c}</option>`).join('');
-    $('lights').innerHTML = s.light_names.map(n=>`
-      <div class="slider"><span style="width:56px">${n}</span>
-      <input type="range" min="0" max="1" step="0.01" value="0"
-             oninput="setLight('${n}', this.value)"></div>`).join('');
-    built=true;
+    $('channel').innerHTML=s.opto_channels.map(c=>`<option>${c}</option>`).join('');
+    $('lights').innerHTML=s.light_names.map(n=>`
+      <div class="slider"><label>${n}</label>
+      <input type="range" min="0" max="1" step="0.01" value="0" oninput="setLight('${n}',this.value)">
+      </div>`).join('');
+    fit();built=true;
   }
 }
-updateDuty(); poll(); setInterval(poll, 1500);
+updateDuty();refresh();setInterval(refresh,1200);
+window.addEventListener('load',fit);
 </script>
 </body>
 </html>

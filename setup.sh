@@ -119,20 +119,19 @@ check_py() {  # $1 = import name, $2 = friendly, $3 = fix
 check_py fastapi      "fastapi"            "pip install --break-system-packages fastapi"
 check_py uvicorn      "uvicorn"            "pip install --break-system-packages 'uvicorn[standard]'"
 check_py picamera2    "picamera2"          "sudo apt install python3-picamera2 (use system python3)"
-check_py rpi_hardware_pwm "rpi-hardware-pwm" "pip install --break-system-packages rpi-hardware-pwm"
+check_py cv2          "opencv (cv2)"       "sudo apt install python3-opencv"
+check_py numpy        "numpy"              "sudo apt install python3-numpy"
 check_py adafruit_pca9685 "adafruit PCA9685" "pip install --break-system-packages adafruit-circuitpython-pca9685 adafruit-blinka"
 
 # App self-test: import modules and report mock vs real hardware
 echo
 info "App self-test"
 ( cd "$APP_DIR" && python3 - <<'PY' 2>/dev/null
-import importlib
-for m in ("config","opto","illumination","camera"):
-    importlib.import_module(m)
-import opto, illumination, camera
-print("  opto:", "HARDWARE PWM" if opto._HW_PWM else "MOCK")
-print("  illumination:", illumination.lights.message)
+import hardware, illumination, opto, tracker, closed_loop, camera
+print("  PCA9685:", hardware.pca.message)
+print("  opto:", "PCA9685" if opto.controller.state.get("hw") else "MOCK")
 print("  camera:", camera.camera.message)
+print("  tracker + closed-loop: loaded")
 PY
 ) && ok "app modules import cleanly" || warn "app modules failed to import — see errors above"
 

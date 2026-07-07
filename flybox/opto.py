@@ -1,28 +1,22 @@
-"""Optogenetic pulse-train control via the PCA9685 (ch2 red / ch3 blue).
+"""Optogenetic pulse trains via the shared PCA9685 (ch2 red / ch3 blue).
 
-Your PicoBuck PWM inputs are wired to the PCA9685, so opto is driven over I2C on
-the same board as the strips. We generate the pulse train by gating the channel
-fully ON/OFF in software (leaving the PCA9685's shared carrier frequency free for
-flicker-free strip dimming). The PCA9685 duty during "ON" sets LED intensity.
+The PicoBuck PWM inputs are wired to the PCA9685, so opto is driven over I2C. We
+gate the channel fully ON/OFF in software to build the pulse train (leaving the
+PCA9685 carrier free for flicker-free strip dimming); the "ON" level sets LED
+intensity.
 
-Timing note: software/I2C gating has ~1-few ms jitter, which is fine for typical
-opto pulses (>= a few ms). For sub-ms precision you'd rewire to hardware PWM.
-
-Protocol is parameterized the experimentally-clear way:
-    frequency_hz, pulse_width_ms, train_duration_s, rest_s, n_bursts, intensity
-Duty (carrier) is not the stimulation frequency — the software gate is.
+Timing: software/I2C gating has ~1-few ms jitter, fine for typical opto pulses.
+Parameterization: frequency_hz, pulse_width_ms, train_duration_s, rest_s,
+n_bursts, intensity.
 """
 from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 from config import OPTO_CHANNELS, OPTO_MAX_FREQ_HZ, OPTO_DEFAULT_INTENSITY
-
-# Reuse the single shared PCA9685 instance owned by illumination.py so we don't
-# open two conflicting handles on the same I2C device.
-from illumination import lights
+from hardware import pca
 
 
 @dataclass
@@ -33,7 +27,7 @@ class Protocol:
     rest_s: float = 5.0
     n_bursts: int = 5
     channel: str = "red"
-    intensity: float = OPTO_DEFAULT_INTENSITY  # 0..1
+    intensity: float = OPTO_DEFAULT_INTENSITY
 
     def period_ms(self) -> float:
         return 1000.0 / self.frequency_hz if self.frequency_hz > 0 else 0.0
@@ -62,12 +56,10 @@ class OptoController:
     def __init__(self):
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self.state = {"running": False, "message": "idle", "hw": lights.hw}
-        if not lights.hw:
-            self.state["message"] = "MOCK (no PCA9685 I2C)"
+        self.state = {"running": False, "message": "idle", "hw": pca.hw}
 
     def _set(self, channel: str, level: float):
-        lights.set_raw_channel(OPTO_CHANNELS[channel], level)
+        pca.set(OPTO_CHANNELS[channel], level)
 
     def run(self, proto: Protocol) -> str | None:
         err = proto.validate()
@@ -81,28 +73,25 @@ class OptoController:
         return None
 
     def _run_protocol(self, proto: Protocol):
-        self.state.update(running=True, message="running")
-        ch = proto.channel
+        self.state.update(running=True, message="running", protocol=asdict(proto))
         try:
             for i in range(1, proto.n_bursts + 1):
                 if self._stop.is_set():
                     break
                 self.state["message"] = f"burst {i}/{proto.n_bursts}: stimulating"
                 self._pulse_train(proto)
-                self._set(ch, 0.0)  # ensure off between bursts
+                self._set(proto.channel, 0.0)
                 if i < proto.n_bursts and not self._stop.is_set():
                     self.state["message"] = f"burst {i}/{proto.n_bursts}: resting"
                     self._sleep(proto.rest_s)
         finally:
-            self._set(ch, 0.0)
+            self._set(proto.channel, 0.0)
             self.state.update(running=False,
                               message="aborted" if self._stop.is_set() else "complete")
 
     def _pulse_train(self, proto: Protocol):
-        """Gate the channel on/off for train_duration_s at the requested freq."""
         ch = proto.channel
-        if proto.frequency_hz <= 0:
-            # continuous ON for the burst duration
+        if proto.frequency_hz <= 0:  # continuous ON for the burst
             self._set(ch, proto.intensity)
             self._sleep(proto.train_duration_s)
             self._set(ch, 0.0)
@@ -117,7 +106,6 @@ class OptoController:
             self._sleep(off_s)
 
     def _sleep(self, seconds: float):
-        """Sleep that wakes early on stop; uses perf_counter for better accuracy."""
         end = time.perf_counter() + seconds
         while True:
             remaining = end - time.perf_counter()

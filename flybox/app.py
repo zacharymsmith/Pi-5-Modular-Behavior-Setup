@@ -1,31 +1,34 @@
-"""FastAPI service for the Pi 5 fly-behavior box.
+"""FlyBox FastAPI service — wires camera, illumination, opto, tracking, closed loop.
 
-Run:  uvicorn app:app --host 0.0.0.0 --port 8000
-Then open http://<pi-ip>:8000 in a browser (LAN, Pi Connect, or AP mode).
-
-Owns: camera preview/record, illumination (PCA9685/MOSFET), opto pulse trains
-(hardware PWM/PicoBuck). Closed-loop tracking is stubbed in closed_loop.py.
+Run:  python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 import os
 
-from config import HOST, PORT, LIGHT_CHANNELS, OPTO_CHANNELS
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse, HTMLResponse
+from pydantic import BaseModel
+
+from config import LIGHT_CHANNELS, OPTO_CHANNELS, HOST, PORT
 from camera import camera
 from illumination import lights
 from opto import controller as opto, Protocol
+from tracker import Tracker
+from closed_loop import ClosedLoop
 
 app = FastAPI(title="FlyBox Controller")
+
+# --- assemble the vision pipeline -----------------------------------------
+tracker = Tracker()
+loop = ClosedLoop(tracker)
+camera.frame_cb = loop.on_frame       # every frame flows through tracking/closed-loop
 
 HERE = os.path.dirname(__file__)
 TEMPLATES = os.path.join(HERE, "templates")
 
 
-# ---------- schemas ----------
+# --- schemas ---------------------------------------------------------------
 class ProtocolIn(BaseModel):
     frequency_hz: float = 20.0
     pulse_width_ms: float = 10.0
@@ -38,15 +41,34 @@ class ProtocolIn(BaseModel):
 
 class LightIn(BaseModel):
     name: str
-    level: float  # 0..1
+    level: float
 
 
 class RawChannelIn(BaseModel):
-    channel: int   # PCA9685 0..15
-    level: float   # 0..1
+    channel: int
+    level: float
 
 
-# ---------- UI ----------
+class TrackIn(BaseModel):
+    enabled: bool | None = None
+    threshold: int | None = None
+    invert: bool | None = None
+    min_area: int | None = None
+
+
+class LoopIn(BaseModel):
+    enabled: bool | None = None
+    cooldown_s: float | None = None
+
+
+class RoiIn(BaseModel):
+    nx1: float
+    ny1: float
+    nx2: float
+    ny2: float
+
+
+# --- UI + stream -----------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open(os.path.join(TEMPLATES, "index.html")) as f:
@@ -59,7 +81,7 @@ def stream():
                              media_type="multipart/x-mixed-replace; boundary=frame")
 
 
-# ---------- status ----------
+# --- status ----------------------------------------------------------------
 @app.get("/api/status")
 def status():
     return {
@@ -68,14 +90,17 @@ def status():
         "lights": lights.levels,
         "light_names": list(LIGHT_CHANNELS.keys()),
         "opto_channels": list(OPTO_CHANNELS.keys()),
+        "tracker": tracker.settings(),
+        "loop": loop.status(),
     }
 
 
-# ---------- opto ----------
+# --- opto ------------------------------------------------------------------
 @app.post("/api/opto/run")
 def opto_run(p: ProtocolIn):
-    err = opto.run(Protocol(**p.dict()))
-    return {"ok": err is None, "error": err, "duty_pct": Protocol(**p.dict()).duty_cycle_pct()}
+    proto = Protocol(**p.dict())
+    err = opto.run(proto)
+    return {"ok": err is None, "error": err, "duty_pct": proto.duty_cycle_pct()}
 
 
 @app.post("/api/opto/stop")
@@ -84,16 +109,14 @@ def opto_stop():
     return {"ok": True}
 
 
-# ---------- illumination ----------
+# --- illumination ----------------------------------------------------------
 @app.post("/api/light")
 def set_light(l: LightIn):
-    err = lights.set_light(l.name, l.level)
-    return {"ok": err is None, "error": err}
+    return {"ok": lights.set_light(l.name, l.level) is None}
 
 
 @app.post("/api/light/raw")
 def set_raw(r: RawChannelIn):
-    """Discovery/identify: drive a bare PCA9685 channel to learn what it lights."""
     lights.set_raw_channel(r.channel, r.level)
     return {"ok": True}
 
@@ -104,7 +127,7 @@ def lights_off():
     return {"ok": True}
 
 
-# ---------- recording ----------
+# --- recording -------------------------------------------------------------
 @app.post("/api/record/start")
 def record_start():
     err = camera.start_recording()
@@ -114,6 +137,48 @@ def record_start():
 @app.post("/api/record/stop")
 def record_stop():
     return {"ok": True, "path": camera.stop_recording()}
+
+
+# --- tracking --------------------------------------------------------------
+@app.post("/api/track")
+def set_track(t: TrackIn):
+    if t.enabled is not None:
+        tracker.enabled = t.enabled
+    if t.threshold is not None:
+        tracker.threshold = t.threshold
+    if t.invert is not None:
+        tracker.invert = t.invert
+    if t.min_area is not None:
+        tracker.min_area = t.min_area
+    return {"ok": True, "tracker": tracker.settings()}
+
+
+# --- closed loop -----------------------------------------------------------
+@app.post("/api/loop")
+def set_loop(l: LoopIn):
+    if l.enabled is not None:
+        loop.enabled = l.enabled
+    if l.cooldown_s is not None:
+        loop.cooldown_s = l.cooldown_s
+    return {"ok": True, "loop": loop.status()}
+
+
+@app.post("/api/loop/roi")
+def set_roi(r: RoiIn):
+    loop.set_roi(r.nx1, r.ny1, r.nx2, r.ny2)
+    return {"ok": True, "loop": loop.status()}
+
+
+@app.post("/api/loop/clear_roi")
+def clear_roi():
+    loop.clear_roi()
+    return {"ok": True}
+
+
+@app.post("/api/loop/protocol")
+def set_loop_protocol(p: ProtocolIn):
+    loop.protocol = Protocol(**p.dict())
+    return {"ok": True, "loop": loop.status()}
 
 
 @app.on_event("shutdown")

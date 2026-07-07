@@ -1,119 +1,175 @@
-"""Camera: picamera2 live MJPEG preview + full-res recording to disk.
+"""Camera pipeline — one capture loop feeds everything.
 
-Pi 5 has no hardware H.264 encoder, so recording uses software encoding. Keep the
-preview low-res (config.CAMERA_PREVIEW_SIZE) and record separately at full res.
-Falls back to a mock (grey frames) so the app runs off-Pi.
+A single background thread grabs frames and fans them out to:
+  * preview   — downscaled JPEG for the browser (<img src=/stream.mjpg>)
+  * recording — full PROCESS_SIZE frames to an .mp4 via cv2.VideoWriter
+  * tracking  — an optional frame callback that returns an annotated frame
+
+This unified design is what makes closed-loop possible (tracking sees every
+frame) and avoids the fragile multi-encoder setups. Falls back to a synthetic
+moving-blob generator when picamera2 isn't present, so tracking and closed-loop
+can be developed and demoed on a laptop.
 """
 from __future__ import annotations
 
-import io
 import os
 import time
 import threading
 from datetime import datetime
 
+import numpy as np
+import cv2
+
 from config import (
-    CAMERA_PREVIEW_SIZE,
-    CAMERA_RECORD_SIZE,
-    CAMERA_FPS,
-    RECORDING_DIR,
+    PROCESS_SIZE, PREVIEW_SIZE, CAMERA_FPS, JPEG_QUALITY, RECORDING_DIR,
 )
 
 try:
     from picamera2 import Picamera2
-    from picamera2.encoders import H264Encoder, MJPEGEncoder
-    from picamera2.outputs import FileOutput
     _HW_CAM = True
 except Exception as e:  # pragma: no cover
     _HW_CAM = False
     _IMPORT_ERR = str(e)
 
 
-class _StreamBuffer(io.BufferedIOBase):
-    """Holds the latest JPEG frame; readers block until a new one arrives."""
-
-    def __init__(self):
-        self.frame = None
-        self.cond = threading.Condition()
-
-    def write(self, buf):
-        with self.cond:
-            self.frame = buf
-            self.cond.notify_all()
-
-    def read_latest(self, timeout=1.0):
-        with self.cond:
-            self.cond.wait(timeout)
-            return self.frame
-
-
 class Camera:
     def __init__(self):
         self.hw = _HW_CAM
+        self._cond = threading.Condition()
+        self._jpeg = None            # latest preview JPEG bytes
+        self._frame = None           # latest raw BGR frame (for on-demand grabs)
+        self._fps_est = 0.0
         self.recording = False
         self.record_path = None
-        self._buffer = _StreamBuffer()
+        self._writer = None
+        # callback(frame_bgr) -> annotated_bgr ; set by the app for tracking
+        self.frame_cb = None
         os.makedirs(RECORDING_DIR, exist_ok=True)
+
         if _HW_CAM:
-            self._cam = Picamera2()
-            cfg = self._cam.create_video_configuration(
-                main={"size": CAMERA_RECORD_SIZE},
-                lores={"size": CAMERA_PREVIEW_SIZE},
-                controls={"FrameRate": CAMERA_FPS},
-            )
-            self._cam.configure(cfg)
-            self._cam.start_recording(MJPEGEncoder(), FileOutput(self._buffer), name="lores")
-            self.message = "Picamera2 linked"
+            try:
+                self._cam = Picamera2()
+                cfg = self._cam.create_video_configuration(
+                    main={"size": PROCESS_SIZE, "format": "RGB888"},
+                    controls={"FrameRate": CAMERA_FPS},
+                )
+                self._cam.configure(cfg)
+                self._cam.start()
+                self.message = f"Picamera2 {PROCESS_SIZE[0]}x{PROCESS_SIZE[1]}"
+            except Exception as e:
+                self.hw = False
+                self._cam = None
+                self.message = f"camera error, using mock ({e})"
         else:
             self._cam = None
-            self.message = f"MockCamera (no picamera2: {_IMPORT_ERR})"
-            threading.Thread(target=self._mock_frames, daemon=True).start()
+            self.message = f"mock camera ({_IMPORT_ERR})"
 
-    def _mock_frames(self):
-        """Emit a tiny static JPEG so the preview endpoint works off-Pi."""
-        # 1x1 grey JPEG
-        import base64
-        jpg = base64.b64decode(
-            "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////"
-            "////////////////////////////////////////////////////wgALCAABAAEB"
-            "AREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=")
+        self._t = threading.Thread(target=self._loop, daemon=True)
+        self._t.start()
+
+    # ---- capture loop --------------------------------------------------
+    def _grab(self):
+        if self.hw and self._cam is not None:
+            # picamera2 "RGB888" arrays are byte-ordered such that OpenCV reads
+            # them as BGR — fine for our purposes (grayscale tracking).
+            return self._cam.capture_array("main")
+        return self._mock_frame()
+
+    def _loop(self):
+        last = time.perf_counter()
         while True:
-            self._buffer.write(jpg)
-            time.sleep(1.0 / max(CAMERA_FPS, 1))
+            try:
+                frame = self._grab()
+                if frame is None:
+                    time.sleep(0.01)
+                    continue
 
+                annotated = frame
+                if self.frame_cb is not None:
+                    try:
+                        annotated = self.frame_cb(frame)
+                    except Exception:
+                        annotated = frame  # never let tracking kill the stream
+
+                if self.recording and self._writer is not None:
+                    self._writer.write(frame)
+
+                preview = cv2.resize(annotated, PREVIEW_SIZE)
+                ok, buf = cv2.imencode(
+                    ".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                if ok:
+                    now = time.perf_counter()
+                    dt = now - last
+                    last = now
+                    if dt > 0:
+                        self._fps_est = 0.9 * self._fps_est + 0.1 * (1.0 / dt)
+                    with self._cond:
+                        self._jpeg = buf.tobytes()
+                        self._frame = frame
+                        self._cond.notify_all()
+
+                if not self.hw:
+                    time.sleep(1.0 / CAMERA_FPS)  # pace the mock
+            except Exception:
+                time.sleep(0.05)  # keep the loop alive no matter what
+
+    def _mock_frame(self):
+        """Light background with a dark blob orbiting — exercises the tracker."""
+        w, h = PROCESS_SIZE
+        img = np.full((h, w, 3), 200, np.uint8)
+        t = time.time()
+        cx = int(w / 2 + (w / 3) * np.cos(t))
+        cy = int(h / 2 + (h / 3) * np.sin(t * 1.3))
+        cv2.circle(img, (cx, cy), 14, (30, 30, 30), -1)
+        return img
+
+    # ---- consumers -----------------------------------------------------
     def mjpeg_generator(self):
-        """Yields multipart MJPEG for the browser <img> preview."""
         while True:
-            frame = self._buffer.read_latest()
-            if frame is None:
-                continue
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                   + frame + b"\r\n")
+            with self._cond:
+                self._cond.wait(timeout=1.0)
+                jpg = self._jpeg
+            if jpg:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                       + jpg + b"\r\n")
 
+    def latest_frame(self):
+        with self._cond:
+            return None if self._frame is None else self._frame.copy()
+
+    # ---- recording -----------------------------------------------------
     def start_recording(self, tag: str = "") -> str | None:
         if self.recording:
             return "Already recording."
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{ts}{('_' + tag) if tag else ''}.h264"
+        name = f"{ts}{('_' + tag) if tag else ''}.mp4"
         self.record_path = os.path.join(RECORDING_DIR, name)
-        if _HW_CAM:
-            self._cam.start_encoder(H264Encoder(), FileOutput(self.record_path), name="main")
-        else:
-            open(self.record_path, "wb").close()  # touch a placeholder off-Pi
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        self._writer = cv2.VideoWriter(self.record_path, fourcc, CAMERA_FPS, PROCESS_SIZE)
+        if not self._writer.isOpened():
+            self._writer = None
+            return "Could not open the video writer (codec missing?)."
         self.recording = True
         return None
 
     def stop_recording(self) -> str:
         if not self.recording:
             return ""
-        if _HW_CAM:
-            self._cam.stop_encoder(encoders=None)  # stops the main-stream encoder
         self.recording = False
+        if self._writer is not None:
+            self._writer.release()
+            self._writer = None
         return self.record_path or ""
 
     def status(self):
-        return {"hw": self.hw, "recording": self.recording,
-                "path": self.record_path, "message": self.message}
+        return {
+            "hw": self.hw,
+            "message": self.message,
+            "recording": self.recording,
+            "path": self.record_path,
+            "fps": round(self._fps_est, 1),
+            "size": list(PROCESS_SIZE),
+        }
 
 
 camera = Camera()

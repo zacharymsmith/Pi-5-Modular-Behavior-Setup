@@ -1,76 +1,79 @@
 # FlyBox Controller
 
 Web-based control for the Pi 5 modular fly-behavior box: live camera preview +
-recording, illumination (PCA9685 → MOSFET board → 12 V strips), and optogenetic
-pulse trains (RP1 hardware PWM → PicoBuck). Closed-loop tracking is stubbed for later.
+recording, illumination (white/IR strips), optogenetic pulse trains (red/blue Cree
+LEDs), real-time OpenCV **fly tracking**, and **closed-loop stimulation** (fire the
+LEDs when a fly enters a zone you draw on the video).
 
 Open it in any browser on the LAN, over Pi Connect, or via the Pi's own WiFi (AP mode).
 Replaces the single-user tkinter GUI.
 
-> ⚠️ **Wiring is not yet verified.** The board→load mapping in `config.py` is a best
-> guess and your wiring may currently be jumbled. Use the **Channel discovery** panel
-> in the UI (or `illumination.lights.sweep()`) to learn what each channel actually
-> drives, then correct `config.py`. See `../HARDWARE_AND_SOFTWARE_GUIDE.md`.
+> ✅ **Wiring verified 2026-07-07 via the discovery panel:** everything runs through the
+> **PCA9685** — ch0=IR strip, ch1=white strip, ch2=red opto LED, ch3=blue opto LED (the
+> PicoBuck PWM inputs are on the PCA9685, not the Pi's GPIO). This is captured in
+> `config.py`; re-verify with the discovery panel if you rewire.
 
-## Files
+## Architecture (modular)
+```
+                 app.py  (FastAPI: routes + wiring)
+                   │
+   ┌───────────────┼───────────────────────────┐
+   │               │                            │
+ camera.py     hardware.py (shared PCA9685)   vision
+ (capture loop) │            │                 ├─ tracker.py   (OpenCV centroids)
+   │            ├ illumination.py (strips)     └─ closed_loop.py (zone → opto)
+   │            └ opto.py (pulse trains)
+   └── one loop → preview + recording + frame callback (tracking/closed-loop)
+```
+
 | File | Purpose |
 |------|---------|
-| `app.py` | FastAPI server + routes |
-| `config.py` | **All pin/channel/camera settings — edit this to match your wiring** |
-| `opto.py` | Hardware-PWM pulse-train protocols → PicoBuck |
-| `illumination.py` | PCA9685 illumination + channel discovery |
-| `camera.py` | picamera2 preview + recording |
-| `closed_loop.py` | OpenCV tracking → opto trigger (stub, Phase 4) |
-| `templates/index.html` | Browser UI |
+| `config.py` | **All hardware settings — edit to match your wiring** |
+| `hardware.py` | Single shared PCA9685 bus (mock-aware) |
+| `illumination.py` | White/IR strips + channel discovery |
+| `opto.py` | Optogenetic pulse-train protocols (red/blue via PCA9685) |
+| `camera.py` | Unified capture loop: preview + recording + frame source |
+| `tracker.py` | Real-time OpenCV centroid tracking |
+| `closed_loop.py` | Trigger-zone → opto stimulation |
+| `app.py` | FastAPI server + all routes |
+| `templates/index.html` | Dashboard UI (tracking overlay, drag-to-set trigger zone) |
 | `flybox.service` | systemd unit (start on boot) |
 
-Every hardware module has a **mock fallback**, so the app runs on a laptop for UI work
-without any Pi hardware attached.
+Every hardware module has a **mock fallback** (the camera even generates a moving blob),
+so the whole app — including tracking and closed loop — runs and can be demoed on a
+laptop with no Pi hardware attached.
 
 ## Setup on the Pi 5
+Just run the setup script from the repo root — it installs deps, enables I²C, runs
+diagnostics, and can launch the app:
+```
+bash setup.sh          # install + diagnose
+bash setup.sh run      # + launch at http://<pi-ip>:8000
+```
+`numpy` and OpenCV come from **apt** (`python3-numpy`, `python3-opencv`), never pip —
+a pip numpy breaks picamera2's binary compatibility.
 
-1. Enable hardware PWM for the opto pins. Edit `/boot/firmware/config.txt`:
-   ```
-   dtoverlay=pwm          # GPIO18 only.  Use pwm-2chan if you also wire GPIO19.
-   dtparam=i2c_arm=on     # for the PCA9685
-   ```
-   Reboot.
+## Using it
+1. **Illumination** — white/IR sliders (or the discovery panel to re-check wiring).
+2. **Tracking** — flip "Enable tracking overlay," tune the threshold until the fly is
+   circled, confirm "dark subject on light background" matches your IR backlight.
+3. **Closed loop** — drag a rectangle on the video to set the trigger zone, pick the
+   protocol (▶ set it from the opto panel), then "Arm closed loop." A fly entering the
+   zone fires the LEDs, rate-limited by the cooldown.
+4. **Record** — writes an MP4 at the processing resolution.
 
-2. Install deps (use the **system** Python so picamera2 is importable):
-   ```
-   sudo apt install -y python3-picamera2 python3-pip i2c-tools
-   pip install --break-system-packages -r requirements.txt
-   ```
-
-3. Confirm hardware is visible:
-   ```
-   i2cdetect -y 1              # expect 0x40 for the PCA9685
-   ls /sys/class/pwm/pwmchip2  # RP1 PWM present
-   cat /proc/device-tree/model # confirm "Raspberry Pi 5"
-   ```
-
-4. Run:
-   ```
-   cd flybox
-   python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
-   ```
-   Open `http://<pi-ip>:8000`.
-
-5. (Optional) Start on boot: install `flybox.service` (see comments in that file).
-
-## Remote access options
-- **LAN:** `http://<pi-ip>:8000` or `http://raspberrypi.local:8000`.
-- **Pi Connect:** for remote/off-site access without firewall setup.
-- **AP mode:** make the Pi broadcast its own WiFi (like your environmental monitor) so
-  the box is self-contained — connect to its SSID, open the same URL.
+## Remote access
+- **LAN:** `http://<pi-ip>:8000` or `http://raspberrypi.local:8000`
+- **Pi Connect:** remote/off-site without firewall setup
+- **AP mode:** Pi broadcasts its own WiFi; connect and open the same URL
 
 ## Safety before running LEDs
-Do the pre-solder checklist in `../HARDWARE_AND_SOFTWARE_GUIDE.md` §8 first:
-verify barrel polarity, common ground, PicoBuck current with a series ammeter (start low),
-and irradiance at the fly plane in mW/cm².
+See `../HARDWARE_AND_SOFTWARE_GUIDE.md` §8: barrel polarity, common ground, PicoBuck
+current with a series ammeter (start low), and irradiance at the fly plane in mW/cm².
 
 ## Roadmap
-1. ✅ Preview + record, illumination, opto protocols (this scaffold).
-2. Verify/rebuild wiring map via discovery panel.
-3. Tune camera exposure/IR, add experiment logging (protocol + timestamps → CSV/JSON).
-4. Closed loop: implement `closed_loop.detect()` + `trigger_condition()`.
+1. ✅ Preview + record, illumination, opto protocols.
+2. ✅ Wiring map verified via discovery panel.
+3. ✅ Real-time tracking + closed-loop stimulation.
+4. Next: experiment logging (protocol + trigger events + timestamps → CSV/JSON per run),
+   camera exposure/IR tuning, multi-fly identity tracking.
