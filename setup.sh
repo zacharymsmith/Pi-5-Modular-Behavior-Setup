@@ -58,6 +58,20 @@ if [ "$MODE" != "check" ]; then
        && ok "pip packages installed" \
        || warn "pip install had problems — see output above"
 
+  # Guard: a pip numpy/opencv in ~/.local or /usr/local shadows the apt builds
+  # and breaks picamera2/simplejpeg with an ABI error ("numpy.dtype size
+  # changed"). Detect and remove the shadow so the apt versions load.
+  if python3 -c "import numpy,sys; sys.exit(0 if ('.local' in numpy.__file__ or '/usr/local' in numpy.__file__) else 1)" 2>/dev/null; then
+    warn "found a pip numpy shadowing the system numpy — removing it"
+    pip uninstall -y --break-system-packages numpy opencv-python opencv-python-headless >/dev/null 2>&1 || true
+    sudo apt-get install -y -qq --reinstall python3-numpy python3-opencv >/dev/null 2>&1 || true
+  fi
+  if python3 -c "import picamera2" 2>/dev/null; then
+    ok "picamera2 imports cleanly"
+  else
+    warn "picamera2 not importable — try: pip uninstall -y numpy (removes a shadowing copy)"
+  fi
+
   echo
   info "Enabling hardware PWM + I2C in $CONFIG_TXT"
   ensure_line() {  # $1 = line to guarantee present

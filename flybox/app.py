@@ -5,6 +5,7 @@ Run:  python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -16,6 +17,7 @@ from illumination import lights
 from opto import controller as opto, Protocol
 from tracker import Tracker
 from closed_loop import ClosedLoop
+import presets
 
 app = FastAPI(title="FlyBox Controller")
 
@@ -54,6 +56,21 @@ class TrackIn(BaseModel):
     threshold: int | None = None
     invert: bool | None = None
     min_area: int | None = None
+    trails: bool | None = None
+    trail_len: int | None = None
+
+
+class CameraConfigIn(BaseModel):
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    auto_exposure: bool | None = None
+    exposure_us: int | None = None
+    gain: float | None = None
+
+
+class PresetIn(BaseModel):
+    name: str
 
 
 class LoopIn(BaseModel):
@@ -161,6 +178,12 @@ def set_track(t: TrackIn):
         tracker.invert = t.invert
     if t.min_area is not None:
         tracker.min_area = t.min_area
+    if t.trails is not None:
+        tracker.trails = t.trails
+        if not t.trails:
+            tracker.clear_trails()
+    if t.trail_len is not None:
+        tracker.trail_len = t.trail_len
     return {"ok": True, "tracker": tracker.settings()}
 
 
@@ -209,6 +232,93 @@ def set_loop_protocol(p: ProtocolIn):
 def camera_retry():
     msg = camera.reinit()
     return {"ok": camera.hw, "hw": camera.hw, "message": msg}
+
+
+class MockIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/camera/mock")
+def camera_mock(m: MockIn):
+    return {"ok": True, "mock": camera.set_mock(m.enabled)}
+
+
+@app.post("/api/camera/config")
+def camera_config(c: CameraConfigIn):
+    size = None
+    if c.width is not None and c.height is not None:
+        size = (c.width, c.height)
+    err = camera.apply_config(size=size, fps=c.fps, auto_exposure=c.auto_exposure,
+                              exposure_us=c.exposure_us, gain=c.gain)
+    return {"ok": err is None, "error": err, "camera": camera.status()}
+
+
+# --- presets (reproducibility) --------------------------------------------
+def _gather_config() -> dict:
+    s = camera.status()
+    return {
+        "protocols": {c: asdict(p) for c, p in loop.protocols.items()},
+        "zones": [{"roi": list(z["roi"]), "channel": z["channel"]} for z in loop.zones],
+        "proximity": {"enabled": loop.proximity["enabled"],
+                      "distance_px": loop.proximity["distance_px"],
+                      "channel": loop.proximity["channel"]},
+        "cooldown_s": loop.cooldown_s,
+        "tracker": {"threshold": tracker.threshold, "invert": tracker.invert,
+                    "min_area": tracker.min_area, "trails": tracker.trails,
+                    "trail_len": tracker.trail_len},
+        "camera": {"width": s["size"][0], "height": s["size"][1],
+                   "fps": s["target_fps"], **s["controls"]},
+    }
+
+
+def _apply_config(d: dict):
+    for ch, p in d.get("protocols", {}).items():
+        loop.set_protocol(Protocol(**p))
+    loop.clear_zones()
+    for z in d.get("zones", []):
+        loop.add_zone(*z["roi"], z["channel"])
+    px = d.get("proximity", {})
+    if px:
+        loop.set_proximity(px.get("enabled"), px.get("distance_px"), px.get("channel"))
+    if "cooldown_s" in d:
+        loop.cooldown_s = d["cooldown_s"]
+    tk = d.get("tracker", {})
+    for k in ("threshold", "invert", "min_area", "trails", "trail_len"):
+        if k in tk:
+            setattr(tracker, k, tk[k])
+    cam = d.get("camera", {})
+    if cam:
+        camera.apply_config(
+            size=(cam.get("width"), cam.get("height"))
+            if cam.get("width") and cam.get("height") else None,
+            fps=cam.get("fps"), auto_exposure=cam.get("auto_exposure"),
+            exposure_us=cam.get("exposure_us"), gain=cam.get("gain"))
+
+
+@app.get("/api/presets")
+def list_presets():
+    return {"presets": presets.list_presets()}
+
+
+@app.post("/api/presets/save")
+def save_preset(p: PresetIn):
+    name = presets.save(p.name, _gather_config())
+    return {"ok": True, "name": name, "presets": presets.list_presets()}
+
+
+@app.post("/api/presets/load")
+def load_preset(p: PresetIn):
+    data = presets.load(p.name)
+    if data is None:
+        return {"ok": False, "error": "preset not found"}
+    _apply_config(data)
+    return {"ok": True, "loop": loop.status(), "tracker": tracker.settings(),
+            "camera": camera.status()}
+
+
+@app.post("/api/presets/delete")
+def delete_preset(p: PresetIn):
+    return {"ok": presets.delete(p.name), "presets": presets.list_presets()}
 
 
 @app.on_event("shutdown")

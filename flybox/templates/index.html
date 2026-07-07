@@ -99,8 +99,29 @@
         <button class="red" onclick="rec(false)">■ Stop</button>
       </div>
       <div class="statline" id="recinfo">not recording</div>
+      <label class="switch" style="margin-top:10px"><input type="checkbox" id="mockEn" onchange="setMock()">
+        <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
       <div class="statline warn" id="camMsg"></div>
       <div class="rowbtns"><button class="ghost sm" id="camRetry" style="display:none" onclick="retryCam()">↻ Retry camera</button></div>
+      <details>
+        <summary>Camera options</summary>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Resolution</label><select id="camRes">
+            <option value="640x480">640×480</option>
+            <option value="1024x768">1024×768</option>
+            <option value="1280x720">1280×720</option>
+            <option value="1640x1232">1640×1232</option>
+            <option value="1920x1080">1920×1080</option>
+          </select></div>
+          <div><label>FPS</label><input id="camFps" type="number" value="30" min="1" max="120"></div>
+          <div style="align-self:end"><label class="switch"><input type="checkbox" id="camAuto" checked onchange="camAutoToggle()">
+            <span class="track"><span class="knob"></span></span> Auto-exp</label></div>
+          <div><label>Exposure µs</label><input id="camExp" type="number" value="8000" min="100" step="500" disabled></div>
+          <div><label>Gain</label><input id="camGain" type="number" value="1" min="1" max="16" step="0.1" disabled></div>
+          <div style="align-self:end"><button class="sm" onclick="applyCam()">Apply</button></div>
+        </div>
+        <small class="hint">Resolution change reconfigures the camera — stop recording first.</small>
+      </details>
     </section>
 
     <section class="card">
@@ -141,6 +162,20 @@
   <!-- RIGHT -->
   <div class="col">
     <section class="card">
+      <h2>Presets · reproducibility</h2>
+      <p class="sub">Save the whole setup (protocols, zones, proximity, tracking, camera) and reload it exactly.</p>
+      <div class="inline" style="gap:8px">
+        <select id="presetSel" style="flex:1"></select>
+        <button class="sm" onclick="loadPreset()">Load</button>
+        <button class="sm" onclick="deletePreset()">Delete</button>
+      </div>
+      <div class="inline" style="gap:8px;margin-top:10px">
+        <input id="presetName" placeholder="new preset name" style="flex:1;padding:9px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
+        <button class="primary sm" onclick="savePreset()">Save current</button>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Optogenetics protocol</h2>
       <p class="sub">Also the source for closed-loop trigger protocols (set per channel).</p>
       <label>Channel</label>
@@ -175,6 +210,11 @@
       </div>
       <label class="switch" style="margin-top:6px"><input type="checkbox" id="invert" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="trailsEn" onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Motion trails overlay</label>
+      <div class="slider"><label>Trail len</label>
+        <input id="trailLen" type="range" min="5" max="120" value="30" oninput="setTrack()">
+        <span class="val" id="trailLenVal">30</span></div>
       <div class="kv" style="margin-top:12px"><span>Currently tracked</span><b id="trackCount">0</b></div>
     </section>
 
@@ -213,8 +253,28 @@ function stopOpto(){post('/api/opto/stop');}
 
 // tracking
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
+  $('trailLenVal').textContent=$('trailLen').value;
   post('/api/track',{enabled:$('trackEn').checked,threshold:+$('thresh').value,
-    invert:$('invert').checked,min_area:+$('minarea').value});}
+    invert:$('invert').checked,min_area:+$('minarea').value,
+    trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+
+// camera options
+function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('camGain').disabled=a;}
+function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
+  post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
+    exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
+
+// presets
+async function refreshPresets(){const r=await fetch('/api/presets').then(x=>x.json());
+  const sel=$('presetSel'),cur=sel.value;
+  sel.innerHTML=(r.presets.length?r.presets:['']).map(p=>`<option value="${p}">${p||'(none saved)'}</option>`).join('');
+  if(cur)sel.value=cur;}
+function savePreset(){const n=$('presetName').value.trim();if(!n){alert('Name the preset first');return;}
+  post('/api/presets/save',{name:n}).then(()=>{$('presetName').value='';refreshPresets();});}
+function loadPreset(){const n=$('presetSel').value;if(!n)return;
+  post('/api/presets/load',{name:n}).then(()=>{built=false;refresh();});}
+function deletePreset(){const n=$('presetSel').value;if(!n)return;
+  post('/api/presets/delete',{name:n}).then(refreshPresets);}
 
 // illumination
 function setLight(n,v){post('/api/light',{name:n,level:v});}
@@ -233,6 +293,7 @@ async function rec(on){const r=await post(on?'/api/record/start':'/api/record/st
   $('recinfo').textContent=on?('recording → '+(r.path||'')):('saved '+(r.path||''));
   $('recinfo').className='statline'+(on?' on':'');}
 function retryCam(){post('/api/camera/retry').then(refresh);}
+function setMock(){post('/api/camera/mock',{enabled:$('mockEn').checked});}
 
 // ROI drag -> add a zone for the selected channel
 const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
@@ -256,12 +317,14 @@ function proto1(p){return `${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.t
 async function refresh(){
   let s;try{s=await fetch('/api/status').then(r=>r.json());}catch(e){return;}
   const badge=ok=>`<span class="badge ${ok?'ok':'mock'}"></span>`;
-  $('chipCam').innerHTML=badge(s.camera.hw)+'camera <b>'+(s.camera.hw?'live':'mock')+'</b>';
+  const camLabel=s.camera.mock?'mock (test)':(s.camera.hw?'live':'mock');
+  $('chipCam').innerHTML=badge(s.camera.hw)+'camera <b>'+camLabel+'</b>';
   $('chipCam').title=s.camera.message||'';
   $('chipPca').innerHTML=badge(s.opto.hw)+'PCA9685 <b>'+(s.opto.hw?'linked':'mock')+'</b>';
   $('chipFps').innerHTML='<b>'+(s.camera.fps||0)+'</b> fps';
-  $('camMsg').textContent=s.camera.hw?'':s.camera.message;
-  $('camRetry').style.display=s.camera.hw?'none':'inline-block';
+  // only warn / offer retry when there's NO real camera (not for the test toggle)
+  $('camMsg').textContent=s.camera.camera_present?'':s.camera.message;
+  $('camRetry').style.display=s.camera.camera_present?'none':'inline-block';
   $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
   $('optoStat').className='statline'+(s.opto.running?' on':'');
   $('trackCount').textContent=s.tracker.count;
@@ -285,10 +348,25 @@ async function refresh(){
     $('proxEn').checked=s.loop.proximity.enabled;
     $('proxDist').value=s.loop.proximity.distance_px;$('proxDistVal').textContent=s.loop.proximity.distance_px+' px';
     $('proxChan').value=s.loop.proximity.channel;
+    $('mockEn').checked=s.camera.mock;
+    // tracking
+    $('trackEn').checked=s.tracker.enabled;
+    $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;
+    $('minarea').value=s.tracker.min_area;$('minareaVal').textContent=s.tracker.min_area;
+    $('invert').checked=s.tracker.invert;
+    $('trailsEn').checked=s.tracker.trails;
+    $('trailLen').value=s.tracker.trail_len;$('trailLenVal').textContent=s.tracker.trail_len;
+    // camera options
+    $('camRes').value=s.camera.size[0]+'x'+s.camera.size[1];
+    $('camFps').value=s.camera.target_fps;
+    $('camAuto').checked=s.camera.controls.auto_exposure;
+    $('camExp').value=s.camera.controls.exposure_us;
+    $('camGain').value=s.camera.controls.gain;
+    camAutoToggle();
     fit();built=true;
   }
 }
-updateDuty();refresh();setInterval(refresh,1200);
+updateDuty();refresh();refreshPresets();setInterval(refresh,1200);
 window.addEventListener('load',fit);
 </script>
 </body>

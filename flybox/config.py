@@ -35,11 +35,26 @@ OPTO_DEFAULT_INTENSITY = 1.0    # 0..1
 # ---------------------------------------------------------------------------
 # One capture stream feeds preview + recording + tracking. Keep it modest so the
 # Pi 5 can track in real time; record at the same resolution.
-PROCESS_SIZE = (1024, 768)      # capture/record/track resolution (w, h)
+PROCESS_SIZE = (1024, 768)      # default capture/record/track resolution (w, h)
 PREVIEW_SIZE = (640, 480)       # downscaled JPEG sent to the browser
 CAMERA_FPS = 30
 JPEG_QUALITY = 80
 RECORDING_DIR = "recordings"    # created under the app folder
+# Exposure/gain defaults (picamera2 controls). auto=True lets the camera decide.
+CAMERA_AUTO_EXPOSURE = True
+CAMERA_EXPOSURE_US = 8000       # microseconds, used when auto is off
+CAMERA_GAIN = 1.0               # analogue gain, used when auto is off
+
+# ---------------------------------------------------------------------------
+# Presets (saved experiment configurations for reproducibility)
+# ---------------------------------------------------------------------------
+PRESETS_DIR = "presets"
+
+# ---------------------------------------------------------------------------
+# Motion trails overlay
+# ---------------------------------------------------------------------------
+TRAIL_ENABLED = False
+TRAIL_LENGTH = 30               # frames of history to draw
 
 # ---------------------------------------------------------------------------
 # Tracking (OpenCV)

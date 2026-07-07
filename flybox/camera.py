@@ -1,14 +1,9 @@
-"""Camera pipeline — one capture loop feeds everything.
+"""Camera pipeline — one capture loop feeds preview + recording + tracking.
 
-A single background thread grabs frames and fans them out to:
-  * preview   — downscaled JPEG for the browser (<img src=/stream.mjpg>)
-  * recording — full PROCESS_SIZE frames to an .mp4 via cv2.VideoWriter
-  * tracking  — an optional frame callback that returns an annotated frame
-
-This unified design is what makes closed-loop possible (tracking sees every
-frame) and avoids the fragile multi-encoder setups. Falls back to a synthetic
-moving-blob generator when picamera2 isn't present, so tracking and closed-loop
-can be developed and demoed on a laptop.
+Resolution, fps, exposure and gain are runtime-configurable (see apply_config).
+Falls back to a synthetic two-fly generator when picamera2 isn't present, and a
+UI toggle (force_mock) can switch to that synthetic feed even with a live camera,
+so the whole program can be tested without live flies.
 """
 from __future__ import annotations
 
@@ -22,6 +17,7 @@ import cv2
 
 from config import (
     PROCESS_SIZE, PREVIEW_SIZE, CAMERA_FPS, JPEG_QUALITY, RECORDING_DIR,
+    CAMERA_AUTO_EXPOSURE, CAMERA_EXPOSURE_US, CAMERA_GAIN,
 )
 
 try:
@@ -37,14 +33,19 @@ class Camera:
         self.hw = False
         self._cam = None
         self.message = ""
+        self.size = list(PROCESS_SIZE)      # runtime resolution (w, h)
+        self.fps = CAMERA_FPS
+        self.controls = {"auto_exposure": CAMERA_AUTO_EXPOSURE,
+                         "exposure_us": CAMERA_EXPOSURE_US,
+                         "gain": CAMERA_GAIN}
         self._cond = threading.Condition()
-        self._jpeg = None            # latest preview JPEG bytes
-        self._frame = None           # latest raw BGR frame (for on-demand grabs)
+        self._jpeg = None
+        self._frame = None
         self._fps_est = 0.0
         self.recording = False
         self.record_path = None
         self._writer = None
-        # callback(frame_bgr) -> annotated_bgr ; set by the app for tracking
+        self.force_mock = False
         self.frame_cb = None
         os.makedirs(RECORDING_DIR, exist_ok=True)
 
@@ -52,8 +53,18 @@ class Camera:
         self._t = threading.Thread(target=self._loop, daemon=True)
         self._t.start()
 
+    # ---- camera lifecycle ---------------------------------------------
+    def _cam_controls(self):
+        c = {"FrameRate": self.fps}
+        if self.controls["auto_exposure"]:
+            c["AeEnable"] = True
+        else:
+            c["AeEnable"] = False
+            c["ExposureTime"] = int(self.controls["exposure_us"])
+            c["AnalogueGain"] = float(self.controls["gain"])
+        return c
+
     def _open(self):
-        """Try to open the real camera; fall back to mock with a clear reason."""
         if not _HW_CAM:
             self.hw = False
             self._cam = None
@@ -62,22 +73,20 @@ class Camera:
         try:
             cam = Picamera2()
             cfg = cam.create_video_configuration(
-                main={"size": PROCESS_SIZE, "format": "RGB888"},
-                controls={"FrameRate": CAMERA_FPS},
+                main={"size": tuple(self.size), "format": "RGB888"},
+                controls=self._cam_controls(),
             )
             cam.configure(cfg)
             cam.start()
             self._cam = cam
             self.hw = True
-            self.message = f"live · Picamera2 {PROCESS_SIZE[0]}x{PROCESS_SIZE[1]}"
+            self.message = f"live · {self.size[0]}x{self.size[1]} @ {self.fps}fps"
         except Exception as e:
             self.hw = False
             self._cam = None
-            # most common cause: another process already owns the camera
             self.message = f"mock — camera busy/unavailable: {e}"
 
     def reinit(self):
-        """Release any handle and try to open the camera again (no app restart)."""
         try:
             if self._cam is not None:
                 self._cam.stop()
@@ -89,13 +98,48 @@ class Camera:
         self._open()
         return self.message
 
+    def apply_config(self, size=None, fps=None, auto_exposure=None,
+                     exposure_us=None, gain=None) -> str | None:
+        """Change camera specs at runtime. Resolution/fps changes reconfigure the
+        camera; exposure/gain apply live. Refused while recording (would corrupt
+        the file)."""
+        needs_reconfigure = False
+        if size is not None and list(size) != self.size:
+            if self.recording:
+                return "Stop recording before changing resolution."
+            self.size = [int(size[0]), int(size[1])]
+            needs_reconfigure = True
+        if fps is not None and float(fps) != self.fps:
+            self.fps = float(fps)
+            needs_reconfigure = True
+        if auto_exposure is not None:
+            self.controls["auto_exposure"] = bool(auto_exposure)
+        if exposure_us is not None:
+            self.controls["exposure_us"] = int(exposure_us)
+        if gain is not None:
+            self.controls["gain"] = float(gain)
+
+        if self.hw and self._cam is not None:
+            try:
+                if needs_reconfigure:
+                    self._cam.stop()
+                    cfg = self._cam.create_video_configuration(
+                        main={"size": tuple(self.size), "format": "RGB888"},
+                        controls=self._cam_controls())
+                    self._cam.configure(cfg)
+                    self._cam.start()
+                else:
+                    self._cam.set_controls(self._cam_controls())
+                self.message = f"live · {self.size[0]}x{self.size[1]} @ {self.fps}fps"
+            except Exception as e:
+                return f"apply failed: {e}"
+        return None
+
     # ---- capture loop --------------------------------------------------
     def _grab(self):
-        if self.hw and self._cam is not None:
-            # picamera2 "RGB888" arrays are byte-ordered such that OpenCV reads
-            # them as BGR — fine for our purposes (grayscale tracking).
-            return self._cam.capture_array("main")
-        return self._mock_frame()
+        if self.force_mock or not self.hw or self._cam is None:
+            return self._mock_frame()
+        return self._cam.capture_array("main")
 
     def _loop(self):
         last = time.perf_counter()
@@ -105,20 +149,17 @@ class Camera:
                 if frame is None:
                     time.sleep(0.01)
                     continue
-
                 annotated = frame
                 if self.frame_cb is not None:
                     try:
                         annotated = self.frame_cb(frame)
                     except Exception:
-                        annotated = frame  # never let tracking kill the stream
-
+                        annotated = frame
                 if self.recording and self._writer is not None:
                     self._writer.write(frame)
-
                 preview = cv2.resize(annotated, PREVIEW_SIZE)
-                ok, buf = cv2.imencode(
-                    ".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                ok, buf = cv2.imencode(".jpg", preview,
+                                       [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                 if ok:
                     now = time.perf_counter()
                     dt = now - last
@@ -129,16 +170,13 @@ class Camera:
                         self._jpeg = buf.tobytes()
                         self._frame = frame
                         self._cond.notify_all()
-
-                if not self.hw:
-                    time.sleep(1.0 / CAMERA_FPS)  # pace the mock
+                if self.force_mock or not self.hw:
+                    time.sleep(1.0 / max(self.fps, 1))
             except Exception:
-                time.sleep(0.05)  # keep the loop alive no matter what
+                time.sleep(0.05)
 
     def _mock_frame(self):
-        """Light background with TWO dark blobs orbiting — exercises the tracker,
-        multi-zone triggers, and the proximity trigger (they periodically cross)."""
-        w, h = PROCESS_SIZE
+        w, h = self.size
         img = np.full((h, w, 3), 200, np.uint8)
         t = time.time()
         cx1 = int(w / 2 + (w / 3) * np.cos(t));       cy1 = int(h / 2 + (h / 3) * np.sin(t * 1.3))
@@ -154,12 +192,15 @@ class Camera:
                 self._cond.wait(timeout=1.0)
                 jpg = self._jpeg
             if jpg:
-                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                       + jpg + b"\r\n")
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
 
     def latest_frame(self):
         with self._cond:
             return None if self._frame is None else self._frame.copy()
+
+    def set_mock(self, on: bool) -> bool:
+        self.force_mock = bool(on)
+        return self.force_mock
 
     # ---- recording -----------------------------------------------------
     def start_recording(self, tag: str = "") -> str | None:
@@ -169,7 +210,7 @@ class Camera:
         name = f"{ts}{('_' + tag) if tag else ''}.mp4"
         self.record_path = os.path.join(RECORDING_DIR, name)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self._writer = cv2.VideoWriter(self.record_path, fourcc, CAMERA_FPS, PROCESS_SIZE)
+        self._writer = cv2.VideoWriter(self.record_path, fourcc, self.fps, tuple(self.size))
         if not self._writer.isOpened():
             self._writer = None
             return "Could not open the video writer (codec missing?)."
@@ -187,12 +228,16 @@ class Camera:
 
     def status(self):
         return {
-            "hw": self.hw,
-            "message": self.message,
+            "hw": self.hw and not self.force_mock,
+            "camera_present": self.hw,
+            "mock": self.force_mock,
+            "message": "test mock (forced)" if self.force_mock else self.message,
             "recording": self.recording,
             "path": self.record_path,
             "fps": round(self._fps_est, 1),
-            "size": list(PROCESS_SIZE),
+            "size": list(self.size),
+            "target_fps": self.fps,
+            "controls": dict(self.controls),
         }
 
 

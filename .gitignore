@@ -15,3 +15,6 @@ flybox/recordings/
 
 # OS
 .DS_Store
+
+# Saved presets are per-rig runtime state
+flybox/presets/
