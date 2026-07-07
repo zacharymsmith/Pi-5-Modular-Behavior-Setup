@@ -57,9 +57,11 @@ class RawChannelIn(BaseModel):
 
 class TrackIn(BaseModel):
     enabled: bool | None = None
+    auto_threshold: bool | None = None
     threshold: int | None = None
     invert: bool | None = None
     min_area: int | None = None
+    max_area: int | None = None
     trails: bool | None = None
     trail_len: int | None = None
 
@@ -75,6 +77,14 @@ class CameraConfigIn(BaseModel):
 
 class PresetIn(BaseModel):
     name: str
+
+
+class SessionStartIn(BaseModel):
+    name: str = "session"
+    save_dir: str | None = None
+    experimenter: str | None = None
+    genotype: str | None = None
+    notes: str | None = None
 
 
 class CalibIn(BaseModel):
@@ -202,12 +212,16 @@ def record_stop():
 def set_track(t: TrackIn):
     if t.enabled is not None:
         tracker.enabled = t.enabled
+    if t.auto_threshold is not None:
+        tracker.auto_threshold = t.auto_threshold
     if t.threshold is not None:
         tracker.threshold = t.threshold
     if t.invert is not None:
         tracker.invert = t.invert
     if t.min_area is not None:
         tracker.min_area = t.min_area
+    if t.max_area is not None:
+        tracker.max_area = t.max_area
     if t.trails is not None:
         tracker.trails = t.trails
         if not t.trails:
@@ -215,6 +229,15 @@ def set_track(t: TrackIn):
     if t.trail_len is not None:
         tracker.trail_len = t.trail_len
     return {"ok": True, "tracker": tracker.settings()}
+
+
+@app.post("/api/track/autotune")
+def track_autotune():
+    frame = camera.latest_frame()
+    if frame is None:
+        return {"ok": False, "error": "no camera frame yet"}
+    res = tracker.auto_tune(frame)
+    return {"ok": True, **res, "tracker": tracker.settings()}
 
 
 # --- closed loop -----------------------------------------------------------
@@ -353,10 +376,17 @@ def delete_preset(p: PresetIn):
 
 # --- sessions (experiment logging) ----------------------------------------
 @app.post("/api/session/start")
-def session_start(p: PresetIn):
+def session_start(s: SessionStartIn):
     if session.running:
         return {"ok": False, "error": "session already running"}
-    d = session.start(p.name, _gather_config())
+    session.set_base_dir(s.save_dir)
+    meta = {"info": {"experimenter": s.experimenter, "genotype": s.genotype,
+                     "notes": s.notes},
+            "setup": _gather_config()}
+    try:
+        d = session.start(s.name, meta)
+    except Exception as e:
+        return {"ok": False, "error": f"could not create session folder: {e}"}
     camera.start_recording(directory=d)
     return {"ok": True, "dir": d, "session": session.status()}
 

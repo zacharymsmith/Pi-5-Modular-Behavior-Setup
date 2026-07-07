@@ -57,6 +57,7 @@ class SessionLogger:
     def __init__(self):
         self._lock = threading.Lock()
         self.running = False
+        self.base_dir = SESSIONS_DIR
         self.dir = None
         self.name = None
         self.t0 = 0.0
@@ -65,13 +66,16 @@ class SessionLogger:
         self._ev_f = self._tr_f = None
         self._ev = self._tr = None
 
+    def set_base_dir(self, path: str | None):
+        self.base_dir = os.path.expanduser(path) if path else SESSIONS_DIR
+
     def start(self, name: str, meta: dict) -> str:
         with self._lock:
             if self.running:
                 return self.dir
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.name = _safe(name or "session")
-            self.dir = os.path.join(SESSIONS_DIR, f"{ts}_{self.name}")
+            self.dir = os.path.join(self.base_dir, f"{ts}_{self.name}")
             os.makedirs(self.dir, exist_ok=True)
             self.t0 = time.time()
             self.n_events = self.n_track_rows = 0

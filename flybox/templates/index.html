@@ -39,8 +39,9 @@
   button.ghost{background:transparent}
   button.sm{padding:5px 9px;font-size:12px}
   label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
-  input[type=number],select{width:100%;padding:9px;background:#0e131c;border:1px solid var(--line);
-        border-radius:8px;color:var(--fg)}
+  input[type=number],input[type=text],input:not([type]),select{width:100%;padding:9px;background:#0e131c;
+        border:1px solid var(--line);border-radius:8px;color:var(--fg)}
+  input[disabled]{opacity:.45}
   .inline{display:flex;gap:8px;align-items:center}
   .inline select,.inline input{width:auto}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 12px}
@@ -216,13 +217,21 @@
       <h2>Tracking</h2>
       <label class="switch"><input type="checkbox" id="trackEn" onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
-      <div class="slider" style="margin-top:14px">
+      <div class="rowbtns"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
+        <small class="hint" id="tuneInfo"></small></div>
+      <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
+      <div class="slider" style="margin-top:8px">
         <label>Thresh</label><input id="thresh" type="range" min="0" max="255" value="60" oninput="setTrack()">
         <span class="val" id="threshVal">60</span>
       </div>
       <div class="slider">
-        <label>Min area</label><input id="minarea" type="range" min="1" max="200" value="5" oninput="setTrack()">
-        <span class="val" id="minareaVal">5</span>
+        <label>Min area</label><input id="minarea" type="range" min="1" max="500" value="4" oninput="setTrack()">
+        <span class="val" id="minareaVal">4</span>
+      </div>
+      <div class="slider">
+        <label>Max area</label><input id="maxarea" type="range" min="100" max="20000" step="100" value="4000" oninput="setTrack()">
+        <span class="val" id="maxareaVal">4000</span>
       </div>
       <label class="switch" style="margin-top:6px"><input type="checkbox" id="invert" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
@@ -237,8 +246,16 @@
     <section class="card">
       <h2>Experiment session</h2>
       <p class="sub">Records video + events.csv + tracks.csv + config.json into one folder.</p>
-      <div class="inline" style="gap:8px">
-        <input id="sessName" placeholder="session name" style="flex:1;padding:9px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
+      <label>Save location (blank = default recordings/)</label>
+      <input id="sessDirIn" placeholder="/home/pi5zms/Desktop/data">
+      <div class="grid2" style="margin-top:8px">
+        <div><label>Experimenter</label><input id="sessExp" placeholder="name"></div>
+        <div><label>Genotype / line</label><input id="sessGeno" placeholder="e.g. CS>Chrimson"></div>
+      </div>
+      <label style="margin-top:8px">Notes</label>
+      <input id="sessNotes" placeholder="conditions, temperature, etc.">
+      <div class="inline" style="gap:8px;margin-top:10px">
+        <input id="sessName" placeholder="session name" style="flex:1">
         <button class="green sm" onclick="sessionStart()">Start</button>
         <button class="red sm" onclick="sessionStop()">Stop</button>
       </div>
@@ -304,10 +321,15 @@ function stopOpto(){post('/api/opto/stop');}
 
 // tracking
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
-  $('trailLenVal').textContent=$('trailLen').value;
-  post('/api/track',{enabled:$('trackEn').checked,threshold:+$('thresh').value,
-    invert:$('invert').checked,min_area:+$('minarea').value,
-    trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+  $('maxareaVal').textContent=$('maxarea').value;$('trailLenVal').textContent=$('trailLen').value;
+  $('thresh').disabled=$('autoThr').checked;
+  post('/api/track',{enabled:$('trackEn').checked,auto_threshold:$('autoThr').checked,
+    threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
+    max_area:+$('maxarea').value,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+function autoTune(){post('/api/track/autotune').then(r=>{
+  if(!r.ok){$('tuneInfo').textContent=r.error;return;}
+  $('tuneInfo').textContent=`thr ${r.threshold}, ${r.invert?'dark':'light'} subject, found ${r.detected}`;
+  built=false;refresh();});}
 
 // camera options
 function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('camGain').disabled=a;}
@@ -335,7 +357,10 @@ function setCalib(){const v=parseFloat($('mmpp').value);
 function resetHeat(){post('/api/analytics/reset');}
 
 // sessions
-function sessionStart(){post('/api/session/start',{name:$('sessName').value||'session'});}
+function sessionStart(){post('/api/session/start',{name:$('sessName').value||'session',
+  save_dir:$('sessDirIn').value||null,experimenter:$('sessExp').value||null,
+  genotype:$('sessGeno').value||null,notes:$('sessNotes').value||null}).then(r=>{
+    if(!r.ok)alert(r.error);});}
 function sessionStop(){post('/api/session/stop');}
 
 // scheduler phase builder
@@ -451,8 +476,10 @@ async function refresh(){
     $('mockEn').checked=s.camera.mock;
     // tracking
     $('trackEn').checked=s.tracker.enabled;
-    $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;
+    $('autoThr').checked=s.tracker.auto_threshold;
+    $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;$('thresh').disabled=s.tracker.auto_threshold;
     $('minarea').value=s.tracker.min_area;$('minareaVal').textContent=s.tracker.min_area;
+    $('maxarea').value=s.tracker.max_area;$('maxareaVal').textContent=s.tracker.max_area;
     $('invert').checked=s.tracker.invert;
     $('trailsEn').checked=s.tracker.trails;
     $('trailLen').value=s.tracker.trail_len;$('trailLenVal').textContent=s.tracker.trail_len;

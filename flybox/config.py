@@ -59,9 +59,11 @@ TRAIL_LENGTH = 30               # frames of history to draw
 # ---------------------------------------------------------------------------
 # Tracking (OpenCV)
 # ---------------------------------------------------------------------------
-TRACK_THRESHOLD = 60            # 0..255 grayscale threshold
+TRACK_AUTO_THRESHOLD = True    # Otsu auto-threshold (adapts to lighting) — robust default
+TRACK_THRESHOLD = 60           # manual 0..255 grayscale threshold (used when auto is off)
 TRACK_INVERT = True            # True = dark subject on light background
-TRACK_MIN_AREA = 5             # px; ignore blobs smaller than this
+TRACK_MIN_AREA = 4             # px; ignore blobs smaller than this
+TRACK_MAX_AREA = 4000          # px; ignore blobs bigger than this (e.g. arena/reflections)
 TRACK_MAX_BLOBS = 10           # cap detections per frame
 TRACK_MATCH_DIST_PX = 90       # max px a fly can move between frames to keep its ID
 
