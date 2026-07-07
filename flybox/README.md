@@ -71,9 +71,26 @@ a pip numpy breaks picamera2's binary compatibility.
 See `../HARDWARE_AND_SOFTWARE_GUIDE.md` §8: barrel polarity, common ground, PicoBuck
 current with a series ammeter (start low), and irradiance at the fly plane in mW/cm².
 
+## Data output (reproducibility)
+Each experiment session writes a self-contained folder under `recordings/`:
+
+```
+recordings/20260707_143012_myassay/
+  config.json   # full setup: protocols, zones, proximity, tracking, camera, calibration, git commit
+  events.csv    # every stimulation: t_s, source (zone/proximity/scheduler), channel, protocol, dose_mJ_cm2
+  tracks.csv    # per-frame centroids: t_s, frame, id, x_px, y_px, x_mm, y_mm
+  *.mp4         # the recording
+```
+
+Set the mm/px calibration and per-channel irradiance (mW/cm²) so distances log in mm and
+stimulation logs actual light dose. Save a **preset** to reproduce the whole setup later.
+
 ## Roadmap
 1. ✅ Preview + record, illumination, opto protocols.
 2. ✅ Wiring map verified via discovery panel.
-3. ✅ Real-time tracking + closed-loop stimulation.
-4. Next: experiment logging (protocol + trigger events + timestamps → CSV/JSON per run),
-   camera exposure/IR tuning, multi-fly identity tracking.
+3. ✅ Real-time tracking + closed-loop stimulation (multi-zone red/blue + proximity).
+4. ✅ Identity trajectories, motion trails, presets, camera specs.
+5. ✅ Experiment session logging, spatial calibration, safety caps + light dose,
+   timed scheduler, live analytics (occupancy heatmap + inter-fly distance).
+6. Next ideas: multi-arena grids, velocity/heading metrics, identity-swap correction,
+   auto disk-space management, web-UI auth for shared networks.

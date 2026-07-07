@@ -10,7 +10,8 @@ import threading
 import time
 from dataclasses import dataclass, asdict
 
-from config import OPTO_CHANNELS, OPTO_MAX_FREQ_HZ, OPTO_DEFAULT_INTENSITY
+from config import (OPTO_CHANNELS, OPTO_MAX_FREQ_HZ, OPTO_DEFAULT_INTENSITY,
+                    OPTO_MAX_INTENSITY, OPTO_MAX_TRAIN_S)
 from hardware import pca
 
 
@@ -42,6 +43,10 @@ class Protocol:
                     f"{self.period_ms():.2f} ms at {self.frequency_hz} Hz.")
         if not (0.0 <= self.intensity <= 1.0):
             return "Intensity must be 0..1."
+        if self.intensity > OPTO_MAX_INTENSITY:
+            return f"Intensity exceeds safety cap {OPTO_MAX_INTENSITY}."
+        if self.train_duration_s > OPTO_MAX_TRAIN_S:
+            return f"Burst duration exceeds safety cap {OPTO_MAX_TRAIN_S}s (thermal)."
         if self.n_bursts < 1:
             return "Need at least 1 burst."
         return None

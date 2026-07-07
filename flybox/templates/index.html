@@ -149,6 +149,12 @@
         <select id="proxChan" style="padding:6px" onchange="setProx()">
           <option value="blue">blue</option><option value="red">red</option></select>
       </div>
+      <div class="statline" id="proxDiag">flies: 0 · min dist: —</div>
+      <div class="inline" style="margin-top:8px"><small class="hint">calibration mm/px:</small>
+        <input id="mmpp" type="number" step="0.001" placeholder="e.g. 0.12" style="width:110px;padding:6px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
+        <button class="sm" onclick="setCalib()">Set</button>
+        <small class="hint" id="calibInfo"></small>
+      </div>
 
       <div class="divider"></div>
       <div class="kv"><span>red fires</span><b id="protoRed">—</b></div>
@@ -156,6 +162,16 @@
       <div class="rowbtns"><button class="sm" onclick="setTriggerProto()">Set trigger protocol from opto panel →</button></div>
       <div class="kv" style="margin-top:8px"><span>Fires this session</span><b id="loopFires">0</b></div>
       <div class="kv"><span>Last fire</span><b id="loopLast">—</b></div>
+    </section>
+
+    <section class="card">
+      <h2>Live analytics</h2>
+      <p class="sub">Occupancy heatmap (accumulated) and closest inter-fly distance.</p>
+      <img id="heat" src="/api/analytics/heatmap.jpg" style="width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain">
+      <div class="rowbtns">
+        <button class="ghost sm" onclick="resetHeat()">Reset heatmap</button>
+        <small class="hint" id="minDist">min dist —</small>
+      </div>
     </section>
   </div>
 
@@ -219,6 +235,41 @@
     </section>
 
     <section class="card">
+      <h2>Experiment session</h2>
+      <p class="sub">Records video + events.csv + tracks.csv + config.json into one folder.</p>
+      <div class="inline" style="gap:8px">
+        <input id="sessName" placeholder="session name" style="flex:1;padding:9px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
+        <button class="green sm" onclick="sessionStart()">Start</button>
+        <button class="red sm" onclick="sessionStop()">Stop</button>
+      </div>
+      <div class="kv" style="margin-top:10px"><span>Status</span><b id="sessStat">idle</b></div>
+      <div class="kv"><span>Events / track rows</span><b id="sessCounts">0 / 0</b></div>
+      <div class="kv"><span>Folder</span><b id="sessDir" style="font-size:11px">—</b></div>
+    </section>
+
+    <section class="card">
+      <h2>Scheduler · timed plan</h2>
+      <p class="sub">Build a phase list; it runs automatically with recording + logging.</p>
+      <div class="grid3">
+        <div><label>Phase</label><input id="phName" value="baseline"></div>
+        <div><label>Duration s</label><input id="phDur" type="number" value="60"></div>
+        <div><label>Action</label><select id="phAct" onchange="phActToggle()">
+          <option value="none">none</option><option value="stim">stim</option><option value="light">light</option></select></div>
+        <div id="phChanWrap" style="display:none"><label>Channel</label><select id="phChan"><option value="red">red</option><option value="blue">blue</option></select></div>
+        <div id="phLightWrap" style="display:none"><label>Light</label><select id="phLight"><option value="white">white</option><option value="ir">ir</option></select></div>
+        <div id="phLevelWrap" style="display:none"><label>Level</label><input id="phLevel" type="number" value="1" min="0" max="1" step="0.1"></div>
+      </div>
+      <div class="rowbtns">
+        <button class="sm" onclick="addPhase()">+ Add phase</button>
+        <button class="primary sm" onclick="runPlan()">▶ Run plan</button>
+        <button class="red sm" onclick="stopPlan()">⏹ Stop</button>
+        <button class="ghost sm" onclick="clearPhases()">Clear</button>
+      </div>
+      <div id="phaseList" style="margin-top:6px"><small class="hint">No phases.</small></div>
+      <div class="statline" id="schedStat">idle</div>
+    </section>
+
+    <section class="card">
       <h2>Illumination</h2>
       <div id="lights"></div>
       <div class="rowbtns"><button class="ghost" onclick="lightsOff()">All lights off</button></div>
@@ -276,6 +327,37 @@ function loadPreset(){const n=$('presetSel').value;if(!n)return;
 function deletePreset(){const n=$('presetSel').value;if(!n)return;
   post('/api/presets/delete',{name:n}).then(refreshPresets);}
 
+// calibration
+function setCalib(){const v=parseFloat($('mmpp').value);
+  post('/api/calibration',{mm_per_px:isNaN(v)?null:v});}
+
+// analytics
+function resetHeat(){post('/api/analytics/reset');}
+
+// sessions
+function sessionStart(){post('/api/session/start',{name:$('sessName').value||'session'});}
+function sessionStop(){post('/api/session/stop');}
+
+// scheduler phase builder
+let phases=[];
+function phActToggle(){const a=$('phAct').value;
+  $('phChanWrap').style.display=a==='stim'?'block':'none';
+  $('phLightWrap').style.display=a==='light'?'block':'none';
+  $('phLevelWrap').style.display=a==='light'?'block':'none';}
+function renderPhases(){$('phaseList').innerHTML=phases.length?phases.map((p,i)=>
+  `<div class="zone"><span>${i+1}. ${p.name} · ${p.duration_s}s · ${p.action}${p.channel?' '+p.channel:''}${p.light?' '+p.light+'@'+p.level:''}</span>
+   <button class="ghost sm" onclick="delPhase(${i})">✕</button></div>`).join(''):'<small class="hint">No phases.</small>';}
+function addPhase(){const a=$('phAct').value;
+  phases.push({name:$('phName').value||'phase',duration_s:+$('phDur').value,action:a,
+    channel:a==='stim'?$('phChan').value:null,
+    light:a==='light'?$('phLight').value:null,level:a==='light'?+$('phLevel').value:null});
+  renderPhases();}
+function delPhase(i){phases.splice(i,1);renderPhases();}
+function clearPhases(){phases=[];renderPhases();}
+function runPlan(){if(!phases.length){alert('Add phases first');return;}
+  post('/api/scheduler/run',{name:$('sessName').value||'plan',phases}).then(r=>{if(!r.ok)alert(r.error);});}
+function stopPlan(){post('/api/scheduler/stop');}
+
 // illumination
 function setLight(n,v){post('/api/light',{name:n,level:v});}
 function lightsOff(){post('/api/light/off');}
@@ -332,6 +414,24 @@ async function refresh(){
   $('loopLast').textContent=s.loop.last_event;
   $('protoRed').textContent=proto1(s.loop.protocols.red);
   $('protoBlue').textContent=proto1(s.loop.protocols.blue);
+  // proximity diagnostics, calibration, analytics
+  const an=s.loop.analytics, mmpp=s.loop.mm_per_px;
+  const dtxt=an.min_dist_px!=null?(an.min_dist_px+'px'+(an.min_dist_mm!=null?' ('+an.min_dist_mm+'mm)':'')):'—';
+  $('proxDiag').textContent=`flies: ${s.tracker.count} · min dist: ${dtxt}`;
+  $('minDist').textContent='min dist '+dtxt;
+  $('calibInfo').textContent=mmpp?('≈ '+(s.loop.proximity.distance_mm||'?')+' mm trigger'):'(uncalibrated — px)';
+  // session
+  const ss=s.session;
+  $('sessStat').textContent=ss.running?('● recording '+ss.elapsed_s+'s'):'idle';
+  $('sessStat').className='';
+  $('sessCounts').textContent=ss.n_events+' / '+ss.n_track_rows;
+  $('sessDir').textContent=ss.dir||'—';
+  // scheduler
+  const sc=s.scheduler;
+  $('schedStat').textContent=sc.running?('● '+sc.phase+' ('+sc.remaining_s+'s left)'):'idle';
+  $('schedStat').className='statline'+(sc.running?' on':'');
+  // refresh heatmap (cache-bust)
+  $('heat').src='/api/analytics/heatmap.jpg?t='+Date.now();
   // zones list
   const zl=$('zoneList');
   zl.innerHTML=s.loop.zones.length?s.loop.zones.map(z=>
@@ -362,7 +462,8 @@ async function refresh(){
     $('camAuto').checked=s.camera.controls.auto_exposure;
     $('camExp').value=s.camera.controls.exposure_us;
     $('camGain').value=s.camera.controls.gain;
-    camAutoToggle();
+    $('mmpp').value=s.loop.mm_per_px||'';
+    camAutoToggle();phActToggle();
     fit();built=true;
   }
 }

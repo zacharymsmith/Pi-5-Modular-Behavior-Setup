@@ -203,12 +203,14 @@ class Camera:
         return self.force_mock
 
     # ---- recording -----------------------------------------------------
-    def start_recording(self, tag: str = "") -> str | None:
+    def start_recording(self, tag: str = "", directory: str | None = None) -> str | None:
         if self.recording:
             return "Already recording."
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         name = f"{ts}{('_' + tag) if tag else ''}.mp4"
-        self.record_path = os.path.join(RECORDING_DIR, name)
+        d = directory or RECORDING_DIR
+        os.makedirs(d, exist_ok=True)
+        self.record_path = os.path.join(d, name)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         self._writer = cv2.VideoWriter(self.record_path, fourcc, self.fps, tuple(self.size))
         if not self._writer.isOpened():

@@ -1,18 +1,23 @@
-"""OpenCV fly tracker — classical, CPU-cheap, real-time on the Pi 5.
+"""OpenCV fly tracker with identity-preserving trajectories.
 
-Threshold the grayscale frame, find contours, return centroids, and optionally
-draw fading motion trails (a temporal overlay of recent positions).
+Detects centroids by thresholding, then assigns each a stable ID via greedy
+nearest-neighbor association across frames, so trails and inter-fly distances are
+per-individual. Draws per-ID trajectory polylines (motion trails) on request.
 """
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Dict
 
 import cv2
 
 from config import (TRACK_THRESHOLD, TRACK_INVERT, TRACK_MIN_AREA, TRACK_MAX_BLOBS,
-                    TRAIL_ENABLED, TRAIL_LENGTH)
+                    TRACK_MATCH_DIST_PX, TRAIL_ENABLED, TRAIL_LENGTH)
+
+# distinct BGR colors cycled per identity
+_ID_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
+              (0, 255, 255), (200, 100, 255), (120, 255, 120), (255, 255, 0)]
 
 
 @dataclass
@@ -22,62 +27,99 @@ class Tracker:
     invert: bool = TRACK_INVERT
     min_area: int = TRACK_MIN_AREA
     max_blobs: int = TRACK_MAX_BLOBS
+    match_dist: int = TRACK_MATCH_DIST_PX
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
-    points: List[Tuple[int, int]] = field(default_factory=list)
-    _history: deque = field(default_factory=lambda: deque(maxlen=TRAIL_LENGTH))
+    tracks: List[Dict] = field(default_factory=list)          # [{id,x,y}]
+    _prev: List[Dict] = field(default_factory=list)
+    _next_id: int = 1
+    _trailmap: Dict[int, deque] = field(default_factory=dict)
 
-    def process(self, frame_bgr):
+    # ---- detection -----------------------------------------------------
+    def _detect(self, frame_bgr):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         mode = cv2.THRESH_BINARY_INV if self.invert else cv2.THRESH_BINARY
         _, th = cv2.threshold(gray, int(self.threshold), 255, mode)
         cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
-
-        pts: List[Tuple[int, int]] = []
-        annotated = frame_bgr.copy()
-
-        # trails first, so live markers draw on top
-        if self.trails:
-            self._draw_trails(annotated)
-
+        pts = []
         for c in cnts:
             if cv2.contourArea(c) < self.min_area:
                 continue
             M = cv2.moments(c)
             if M["m00"] == 0:
                 continue
-            x = int(M["m10"] / M["m00"])
-            y = int(M["m01"] / M["m00"])
-            pts.append((x, y))
-            cv2.circle(annotated, (x, y), 10, (0, 230, 0), 2)
-            cv2.drawMarker(annotated, (x, y), (0, 230, 0), cv2.MARKER_CROSS, 14, 1)
+            pts.append((int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])))
             if len(pts) >= self.max_blobs:
                 break
+        return pts
 
-        self.points = pts
+    # ---- identity association (greedy nearest neighbor) ----------------
+    def _assign(self, pts):
+        prev = list(self._prev)
+        tracks = []
+        used = set()
+        for (x, y) in pts:
+            best, bestd = None, self.match_dist ** 2
+            for p in prev:
+                if p["id"] in used:
+                    continue
+                d = (x - p["x"]) ** 2 + (y - p["y"]) ** 2
+                if d < bestd:
+                    best, bestd = p, d
+            if best is not None:
+                used.add(best["id"])
+                tracks.append({"id": best["id"], "x": x, "y": y})
+            else:
+                tracks.append({"id": self._next_id, "x": x, "y": y})
+                self._next_id += 1
+        return tracks
+
+    def process(self, frame_bgr):
+        annotated = frame_bgr.copy()
         if self.trails:
-            if self._history.maxlen != self.trail_len:
-                self._history = deque(self._history, maxlen=self.trail_len)
-            self._history.append(pts)
+            self._draw_trails(annotated)
 
-        cv2.putText(annotated, f"{len(pts)} tracked", (8, 22),
+        pts = self._detect(frame_bgr)
+        tracks = self._assign(pts)
+        self._prev = tracks
+        self.tracks = tracks
+
+        live_ids = {t["id"] for t in tracks}
+        for t in tracks:
+            col = _ID_COLORS[t["id"] % len(_ID_COLORS)]
+            if self.trails:
+                dq = self._trailmap.setdefault(t["id"], deque(maxlen=self.trail_len))
+                if dq.maxlen != self.trail_len:
+                    dq = deque(dq, maxlen=self.trail_len)
+                    self._trailmap[t["id"]] = dq
+                dq.append((t["x"], t["y"]))
+            cv2.circle(annotated, (t["x"], t["y"]), 10, col, 2)
+            cv2.putText(annotated, str(t["id"]), (t["x"] + 8, t["y"] - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+        # forget trails of departed IDs so they don't linger forever
+        for gid in [k for k in self._trailmap if k not in live_ids]:
+            if not self.trails:
+                self._trailmap.pop(gid, None)
+
+        cv2.putText(annotated, f"{len(tracks)} tracked", (8, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 230, 0), 2)
-        return annotated, pts
+        return annotated, tracks
 
     def _draw_trails(self, img):
-        n = len(self._history)
-        for i, frame_pts in enumerate(self._history):
-            fade = (i + 1) / max(n, 1)           # older = dimmer
-            col = (int(60 * fade), int(220 * fade), int(220 * fade))
-            for (x, y) in frame_pts:
-                cv2.circle(img, (x, y), 2, col, -1)
+        for gid, dq in self._trailmap.items():
+            if len(dq) < 2:
+                continue
+            col = _ID_COLORS[gid % len(_ID_COLORS)]
+            pts = list(dq)
+            for i in range(1, len(pts)):
+                cv2.line(img, pts[i - 1], pts[i], col, 1)
 
     def clear_trails(self):
-        self._history.clear()
+        self._trailmap.clear()
 
     def settings(self):
         return {"enabled": self.enabled, "threshold": self.threshold,
                 "invert": self.invert, "min_area": self.min_area,
                 "trails": self.trails, "trail_len": self.trail_len,
-                "count": len(self.points)}
+                "count": len(self.tracks)}

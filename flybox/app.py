@@ -8,15 +8,18 @@ import os
 from dataclasses import asdict
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
+import config
 from config import LIGHT_CHANNELS, OPTO_CHANNELS, HOST, PORT
 from camera import camera
 from illumination import lights
 from opto import controller as opto, Protocol
 from tracker import Tracker
 from closed_loop import ClosedLoop
+from session import logger as session
+from scheduler import Scheduler
 import presets
 
 app = FastAPI(title="FlyBox Controller")
@@ -24,6 +27,7 @@ app = FastAPI(title="FlyBox Controller")
 # --- assemble the vision pipeline -----------------------------------------
 tracker = Tracker()
 loop = ClosedLoop(tracker)
+scheduler = Scheduler(opto, lights, loop)
 camera.frame_cb = loop.on_frame       # every frame flows through tracking/closed-loop
 
 HERE = os.path.dirname(__file__)
@@ -73,6 +77,29 @@ class PresetIn(BaseModel):
     name: str
 
 
+class CalibIn(BaseModel):
+    mm_per_px: float | None = None
+
+
+class IrradianceIn(BaseModel):
+    channel: str
+    mw_cm2: float | None = None
+
+
+class PhaseIn(BaseModel):
+    name: str = "phase"
+    duration_s: float = 10.0
+    action: str = "none"       # none | stim | light
+    channel: str | None = None
+    light: str | None = None
+    level: float | None = None
+
+
+class SchedulerIn(BaseModel):
+    name: str = "session"
+    phases: list[PhaseIn]
+
+
 class LoopIn(BaseModel):
     enabled: bool | None = None
     cooldown_s: float | None = None
@@ -120,6 +147,9 @@ def status():
         "opto_channels": list(OPTO_CHANNELS.keys()),
         "tracker": tracker.settings(),
         "loop": loop.status(),
+        "session": session.status(),
+        "scheduler": scheduler.status(),
+        "irradiance": config.OPTO_IRRADIANCE_MW_CM2,
     }
 
 
@@ -321,8 +351,81 @@ def delete_preset(p: PresetIn):
     return {"ok": presets.delete(p.name), "presets": presets.list_presets()}
 
 
+# --- sessions (experiment logging) ----------------------------------------
+@app.post("/api/session/start")
+def session_start(p: PresetIn):
+    if session.running:
+        return {"ok": False, "error": "session already running"}
+    d = session.start(p.name, _gather_config())
+    camera.start_recording(directory=d)
+    return {"ok": True, "dir": d, "session": session.status()}
+
+
+@app.post("/api/session/stop")
+def session_stop():
+    camera.stop_recording()
+    d = session.stop()
+    return {"ok": True, "dir": d}
+
+
+# --- calibration + light dose ---------------------------------------------
+@app.post("/api/calibration")
+def set_calibration(c: CalibIn):
+    loop.set_calibration(c.mm_per_px)
+    return {"ok": True, "mm_per_px": loop.mm_per_px}
+
+
+@app.post("/api/opto/irradiance")
+def set_irradiance(i: IrradianceIn):
+    if i.channel in config.OPTO_IRRADIANCE_MW_CM2:
+        config.OPTO_IRRADIANCE_MW_CM2[i.channel] = i.mw_cm2
+    return {"ok": True, "irradiance": config.OPTO_IRRADIANCE_MW_CM2}
+
+
+# --- scheduler (timed experiment plan) ------------------------------------
+@app.post("/api/scheduler/run")
+def scheduler_run(s: SchedulerIn):
+    if session.running or scheduler.running:
+        return {"ok": False, "error": "a session or scheduler is already running"}
+    d = session.start(s.name, _gather_config())
+    camera.start_recording(directory=d)
+
+    def _done():
+        camera.stop_recording()
+        session.stop()
+
+    err = scheduler.run([p.dict() for p in s.phases], on_complete=_done)
+    if err:
+        camera.stop_recording()
+        session.stop()
+        return {"ok": False, "error": err}
+    return {"ok": True, "dir": d}
+
+
+@app.post("/api/scheduler/stop")
+def scheduler_stop():
+    scheduler.stop()
+    return {"ok": True}
+
+
+# --- analytics -------------------------------------------------------------
+@app.get("/api/analytics/heatmap.jpg")
+def heatmap():
+    return Response(content=loop.heatmap_jpeg(), media_type="image/jpeg")
+
+
+@app.post("/api/analytics/reset")
+def reset_analytics():
+    loop.reset_heatmap()
+    return {"ok": True}
+
+
 @app.on_event("shutdown")
 def _shutdown():
+    scheduler.stop()
+    if session.running:
+        camera.stop_recording()
+        session.stop()
     opto.cleanup()
     lights.all_off()
 

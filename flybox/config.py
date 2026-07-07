@@ -63,11 +63,32 @@ TRACK_THRESHOLD = 60            # 0..255 grayscale threshold
 TRACK_INVERT = True            # True = dark subject on light background
 TRACK_MIN_AREA = 5             # px; ignore blobs smaller than this
 TRACK_MAX_BLOBS = 10           # cap detections per frame
+TRACK_MATCH_DIST_PX = 90       # max px a fly can move between frames to keep its ID
+
+# ---------------------------------------------------------------------------
+# Spatial calibration
+# ---------------------------------------------------------------------------
+MM_PER_PX = None               # set via UI (measure a known distance); None = px only
 
 # ---------------------------------------------------------------------------
 # Closed loop
 # ---------------------------------------------------------------------------
 CLOSED_LOOP_COOLDOWN_S = 2.0    # min seconds between triggered stimulations
+
+# ---------------------------------------------------------------------------
+# Optogenetics safety + light dose
+# ---------------------------------------------------------------------------
+OPTO_MAX_INTENSITY = 1.0        # hard cap on commanded intensity (0..1)
+OPTO_MAX_TRAIN_S = 30.0         # cap a single burst's ON duration (thermal safety)
+# Measured irradiance at intensity=1.0, in mW/cm^2 at the fly plane. Fill after
+# metering so the log can report actual dose instead of PWM %.
+OPTO_IRRADIANCE_MW_CM2 = {"red": None, "blue": None}
+
+# ---------------------------------------------------------------------------
+# Sessions / experiment logging
+# ---------------------------------------------------------------------------
+SESSIONS_DIR = "recordings"     # each run gets a timestamped subfolder here
+LOG_TRACKS_HZ = 0               # 0 = every frame; else throttle tracks.csv writes
 
 # ---------------------------------------------------------------------------
 # Web server
