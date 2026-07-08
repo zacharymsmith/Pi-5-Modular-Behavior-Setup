@@ -296,6 +296,11 @@
       </div>
       <label class="switch" style="margin-top:6px"><input type="checkbox" id="invert" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="clahe" onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Boost contrast (CLAHE)</label>
+      <div class="rowbtns"><button class="ghost sm" onclick="toggleMask()"><span id="maskBtn">Show detection mask</span></button>
+        <small class="hint">see exactly what the tracker detects</small></div>
+      <img id="maskimg" src="/api/track/mask.jpg" style="display:none;width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain;margin-top:8px">
       <label class="switch" style="margin-top:8px"><input type="checkbox" id="trailsEn" onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Motion trails overlay</label>
       <div class="slider"><label>Trail len</label>
@@ -399,8 +404,11 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     auto_threshold:$('autoThr').checked,
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
     max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
-    trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+    clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
+let maskShown=false;
+function toggleMask(){maskShown=!maskShown;$('maskimg').style.display=maskShown?'block':'none';
+  $('maskBtn').textContent=maskShown?'Hide detection mask':'Show detection mask';}
 function autoTune(){post('/api/track/autotune').then(r=>{
   if(!r.ok){$('tuneInfo').textContent=r.error;return;}
   $('tuneInfo').textContent=`thr ${r.threshold}, ${r.invert?'dark':'light'} subject, found ${r.detected}`;
@@ -559,6 +567,7 @@ async function refresh(){
   $('schedStat').textContent=sc.running?('● '+sc.phase+' ('+sc.remaining_s+'s left)'):'idle';
   $('schedStat').className='statline'+(sc.running?' on':'');
   if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
+  if(maskShown) $('maskimg').src='/api/track/mask.jpg?t='+Date.now();
   // refresh heatmap (cache-bust)
   $('heat').src='/api/analytics/heatmap.jpg?t='+Date.now();
   // zones list
@@ -587,6 +596,7 @@ async function refresh(){
     $('maxarea').value=s.tracker.max_area;$('maxareaVal').textContent=s.tracker.max_area;
     $('tophat').value=s.tracker.tophat_kernel;$('tophatVal').textContent=s.tracker.tophat_kernel;
     $('maxmiss').value=s.tracker.max_missed;$('maxmissVal').textContent=s.tracker.max_missed;
+    $('clahe').checked=s.tracker.clahe;
     $('invert').checked=s.tracker.invert;
     $('trailsEn').checked=s.tracker.trails;
     $('trailLen').value=s.tracker.trail_len;$('trailLenVal').textContent=s.tracker.trail_len;

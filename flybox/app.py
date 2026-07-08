@@ -65,6 +65,7 @@ class TrackIn(BaseModel):
     max_area: int | None = None
     tophat_kernel: int | None = None
     max_missed: int | None = None
+    clahe: bool | None = None
     bgsub_var: int | None = None
     adaptive_block: int | None = None
     adaptive_C: int | None = None
@@ -274,6 +275,8 @@ def set_track(t: TrackIn):
         tracker.tophat_kernel = t.tophat_kernel
     if t.max_missed is not None:
         tracker.max_missed = t.max_missed
+    if t.clahe is not None:
+        tracker.clahe = t.clahe
     if t.trails is not None:
         tracker.trails = t.trails
         if not t.trails:
@@ -316,6 +319,14 @@ def clear_arena():
 def reset_bg():
     tracker.reset_bg()
     return {"ok": True}
+
+
+@app.get("/api/track/mask.jpg")
+def track_mask():
+    frame = camera.latest_frame()
+    if frame is None:
+        return Response(content=b"", media_type="image/jpeg")
+    return Response(content=tracker.mask_jpeg(frame), media_type="image/jpeg")
 
 
 # --- closed loop -----------------------------------------------------------
@@ -399,6 +410,7 @@ def _gather_config() -> dict:
                     "invert": tracker.invert, "auto_threshold": tracker.auto_threshold,
                     "min_area": tracker.min_area, "max_area": tracker.max_area,
                     "tophat_kernel": tracker.tophat_kernel, "max_missed": tracker.max_missed,
+                    "clahe": tracker.clahe,
                     "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
                     "adaptive_C": tracker.adaptive_C,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
@@ -422,8 +434,8 @@ def _apply_config(d: dict):
         loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
     for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
-              "tophat_kernel", "max_missed", "bgsub_var", "adaptive_block", "adaptive_C",
-              "trails", "trail_len"):
+              "tophat_kernel", "max_missed", "clahe", "bgsub_var", "adaptive_block",
+              "adaptive_C", "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     cam = d.get("camera", {})

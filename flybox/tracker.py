@@ -34,6 +34,8 @@ class Tracker:
     threshold: int = TRACK_THRESHOLD
     invert: bool = TRACK_INVERT
     blur: bool = True
+    clahe: bool = False          # local contrast enhancement (helps faint flies)
+    _clahe: object = None
     tophat_kernel: int = TRACK_TOPHAT_KERNEL   # feature size for illumination-invariant method
     bgsub_var: int = 25          # MOG2 sensitivity (lower = more sensitive)
     adaptive_block: int = 51     # adaptive-threshold neighborhood (odd)
@@ -94,6 +96,10 @@ class Tracker:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         if self.blur:
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        if self.clahe:
+            if self._clahe is None:
+                self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray = self._clahe.apply(gray)
         mode = cv2.THRESH_BINARY_INV if self.invert else cv2.THRESH_BINARY
         if self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
@@ -254,12 +260,19 @@ class Tracker:
     def clear_trails(self):
         self._trailmap.clear()
 
+    def mask_jpeg(self, frame_bgr):
+        """The binary detection mask (what the tracker actually sees) as JPEG."""
+        th = self._binarize(frame_bgr)
+        ok, buf = cv2.imencode(".jpg", th)
+        return buf.tobytes() if ok else b""
+
     def settings(self):
         return {"enabled": self.enabled, "method": self.method,
                 "auto_threshold": self.auto_threshold,
                 "threshold": self.threshold, "computed_threshold": self.computed_threshold,
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
                 "tophat_kernel": self.tophat_kernel, "max_missed": self.max_missed,
+                "clahe": self.clahe,
                 "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
                 "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,
