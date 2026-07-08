@@ -385,6 +385,14 @@ def camera_mock(m: MockIn):
     return {"ok": True, "mock": camera.set_mock(m.enabled)}
 
 
+@app.post("/api/camera/autoexpose")
+def camera_autoexpose():
+    """Auto-set exposure/gain to hit a good brightness INSIDE the arena ROI, then
+    lock it. Meters the tracker's arena so the rim/background doesn't skew it."""
+    res = camera.autoexpose_arena(roi=tracker.roi)
+    return res
+
+
 @app.post("/api/camera/config")
 def camera_config(c: CameraConfigIn):
     size = None

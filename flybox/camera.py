@@ -47,6 +47,7 @@ class Camera:
         self._writer = None
         self.force_mock = False
         self.frame_cb = None
+        self._brightness = 0.0
         os.makedirs(RECORDING_DIR, exist_ok=True)
 
         self._open()
@@ -158,6 +159,7 @@ class Camera:
                 if self.recording and self._writer is not None:
                     self._writer.write(frame)
                 preview = cv2.resize(annotated, PREVIEW_SIZE)
+                self._brightness = float(preview.mean())   # live scene brightness 0..255
                 ok, buf = cv2.imencode(".jpg", preview,
                                        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                 if ok:
@@ -202,6 +204,56 @@ class Camera:
         self.force_mock = bool(on)
         return self.force_mock
 
+    def _roi_mask(self, roi):
+        """Boolean mask (at capture size) for an arena ROI dict, or None."""
+        if not roi:
+            return None
+        w, h = self.size
+        m = np.zeros((h, w), np.uint8)
+        x1, y1 = int(roi["x1"] * w), int(roi["y1"] * h)
+        x2, y2 = int(roi["x2"] * w), int(roi["y2"] * h)
+        if roi.get("shape") == "rect":
+            cv2.rectangle(m, (x1, y1), (x2, y2), 255, -1)
+        else:
+            cv2.ellipse(m, ((x1 + x2) // 2, (y1 + y2) // 2),
+                        (max(1, (x2 - x1) // 2), max(1, (y2 - y1) // 2)), 0, 0, 360, 255, -1)
+        return m > 0
+
+    def autoexpose_arena(self, roi=None, target: int = 150, iters: int = 9) -> dict:
+        """Iteratively set exposure (then gain) so the mean brightness INSIDE the
+        arena ROI hits `target`, then lock it. Meters only the arena, so the bright
+        rim/background doesn't fool it. Run after changing your IR."""
+        if not (self.hw and self._cam is not None):
+            return {"ok": False, "error": "no live camera (mock)"}
+        try:
+            mask = self._roi_mask(roi)
+            exp = int(self.controls.get("exposure_us") or 8000)
+            gain = float(self.controls.get("gain") or 1.0)
+            mean = target
+            for _ in range(iters):
+                self._cam.set_controls({"AeEnable": False, "ExposureTime": max(200, int(exp)),
+                                        "AnalogueGain": max(1.0, float(gain))})
+                time.sleep(0.35)                       # let the setting take effect
+                frame = self.latest_frame()
+                if frame is None:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                region = gray[mask] if mask is not None else gray.ravel()
+                mean = float(region.mean()) if region.size else float(gray.mean())
+                if abs(target - mean) <= 6:
+                    break
+                ratio = min(2.0, max(0.5, target / max(mean, 1.0)))
+                if exp < 30000:                        # raise exposure first, then gain
+                    exp = min(33000, max(200, exp * ratio))
+                else:
+                    gain = min(16.0, max(1.0, gain * ratio))
+            self.controls.update(auto_exposure=False, exposure_us=int(exp), gain=round(gain, 2))
+            self._cam.set_controls(self._cam_controls())
+            return {"ok": True, "exposure_us": int(exp), "gain": round(gain, 2),
+                    "measured": round(mean, 1), "target": target, "metered_arena": mask is not None}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ---- recording -----------------------------------------------------
     def start_recording(self, tag: str = "", directory: str | None = None) -> str | None:
         if self.recording:
@@ -240,6 +292,7 @@ class Camera:
             "size": list(self.size),
             "target_fps": self.fps,
             "controls": dict(self.controls),
+            "brightness": round(self._brightness, 1),
         }
 
 

@@ -161,6 +161,11 @@
           <div style="align-self:end"><button class="sm" onclick="applyCam()">Apply</button></div>
         </div>
         <small class="hint">Resolution change reconfigures the camera — stop recording first.</small>
+        <div class="rowbtns" style="margin-top:10px">
+          <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
+          <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
+        </div>
+        <div class="kv"><span>Live scene brightness (0–255)</span><b id="brightVal">—</b></div>
       </details>
     </section>
 
@@ -419,6 +424,11 @@ function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('
 function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
   post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
     exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
+function autoExpose(){$('expInfo').textContent='metering the arena…';
+  post('/api/camera/autoexpose').then(r=>{
+    if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
+    $('expInfo').textContent=`locked ${r.exposure_us}µs · gain ${r.gain} · arena≈${r.measured}`+(r.metered_arena?'':' (whole frame — set an arena ROI)');
+    built=false;refresh();});}
 
 // presets
 async function refreshPresets(){const r=await fetch('/api/presets').then(x=>x.json());
@@ -567,6 +577,7 @@ async function refresh(){
   $('schedStat').textContent=sc.running?('● '+sc.phase+' ('+sc.remaining_s+'s left)'):'idle';
   $('schedStat').className='statline'+(sc.running?' on':'');
   if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
+  if(s.camera.brightness!=null) $('brightVal').textContent=s.camera.brightness;
   if(maskShown) $('maskimg').src='/api/track/mask.jpg?t='+Date.now();
   // refresh heatmap (cache-bust)
   $('heat').src='/api/analytics/heatmap.jpg?t='+Date.now();
