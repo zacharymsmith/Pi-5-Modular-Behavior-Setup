@@ -40,10 +40,35 @@ class Tracker:
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
     computed_threshold: int = TRACK_THRESHOLD
+    roi: object = None          # {"cx","cy","rx","ry"} normalized ellipse, or None
     tracks: List[Dict] = field(default_factory=list)
     _prev: List[Dict] = field(default_factory=list)
     _next_id: int = 1
     _trailmap: Dict[int, deque] = field(default_factory=dict)
+    _mask: object = None
+    _mask_shape: object = None
+
+    # ---- arena ROI (limit tracking to inside the dish) -----------------
+    def set_arena(self, nx1, ny1, nx2, ny2):
+        self.roi = {"cx": (nx1 + nx2) / 2, "cy": (ny1 + ny2) / 2,
+                    "rx": abs(nx2 - nx1) / 2, "ry": abs(ny2 - ny1) / 2}
+        self._mask = None
+
+    def clear_arena(self):
+        self.roi = None
+        self._mask = None
+
+    def _get_mask(self, w, h):
+        if self.roi is None:
+            return None
+        if self._mask is not None and self._mask_shape == (h, w):
+            return self._mask
+        m = np.zeros((h, w), np.uint8)
+        cv2.ellipse(m, (int(self.roi["cx"] * w), int(self.roi["cy"] * h)),
+                    (max(1, int(self.roi["rx"] * w)), max(1, int(self.roi["ry"] * h))),
+                    0, 0, 360, 255, -1)
+        self._mask, self._mask_shape = m, (h, w)
+        return m
 
     # ---- segmentation --------------------------------------------------
     def _binarize(self, frame_bgr):
@@ -57,7 +82,11 @@ class Tracker:
         else:
             _, th = cv2.threshold(gray, int(self.threshold), 255, mode)
             self.computed_threshold = int(self.threshold)
-        return cv2.morphologyEx(th, cv2.MORPH_OPEN, _KERNEL)
+        th = cv2.morphologyEx(th, cv2.MORPH_OPEN, _KERNEL)
+        mask = self._get_mask(th.shape[1], th.shape[0])   # limit to arena ROI
+        if mask is not None:
+            th = cv2.bitwise_and(th, mask)
+        return th
 
     def _detect(self, frame_bgr):
         th = self._binarize(frame_bgr)
@@ -78,13 +107,14 @@ class Tracker:
 
     # ---- auto-tune from a live frame -----------------------------------
     def auto_tune(self, frame_bgr):
-        """Pick polarity + threshold from the current frame. The smaller pixel
-        class after an Otsu split is assumed to be the flies (foreground)."""
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        val, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-        dark = int((gray <= val).sum())
-        light = int((gray > val).sum())
+        """Pick polarity + threshold from the current frame (within the arena ROI
+        if one is set). The smaller pixel class after an Otsu split is the flies."""
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        mask = self._get_mask(gray.shape[1], gray.shape[0])
+        vals = gray[mask > 0] if (mask is not None and (mask > 0).any()) else gray.ravel()
+        val, _ = cv2.threshold(vals.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        dark = int((vals <= val).sum())
+        light = int((vals > val).sum())
         self.invert = dark <= light          # dark minority -> flies are dark
         self.auto_threshold = True
         self.computed_threshold = int(val)
@@ -121,6 +151,11 @@ class Tracker:
 
     def process(self, frame_bgr):
         annotated = frame_bgr.copy()
+        if self.roi is not None:   # show the arena boundary
+            h, w = annotated.shape[:2]
+            cv2.ellipse(annotated, (int(self.roi["cx"] * w), int(self.roi["cy"] * h)),
+                        (int(self.roi["rx"] * w), int(self.roi["ry"] * h)),
+                        0, 0, 360, (255, 255, 0), 1)
         if self.trails:
             self._draw_trails(annotated)
 
@@ -165,4 +200,5 @@ class Tracker:
                 "threshold": self.threshold, "computed_threshold": self.computed_threshold,
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
                 "trails": self.trails, "trail_len": self.trail_len,
+                "roi": self.roi, "has_roi": self.roi is not None,
                 "count": len(self.tracks)}

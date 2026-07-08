@@ -178,6 +178,8 @@ def status():
         "session": session.status(),
         "scheduler": scheduler.status(),
         "irradiance": config.OPTO_IRRADIANCE_MW_CM2,
+        "paths": {"presets_dir": presets.current_dir(),
+                  "sessions_dir": session.base_dir},
     }
 
 
@@ -268,6 +270,25 @@ def track_autotune():
         return {"ok": False, "error": "no camera frame yet"}
     res = tracker.auto_tune(frame)
     return {"ok": True, **res, "tracker": tracker.settings()}
+
+
+class ArenaIn(BaseModel):
+    nx1: float
+    ny1: float
+    nx2: float
+    ny2: float
+
+
+@app.post("/api/track/roi")
+def set_arena(a: ArenaIn):
+    tracker.set_arena(a.nx1, a.ny1, a.nx2, a.ny2)
+    return {"ok": True, "tracker": tracker.settings()}
+
+
+@app.post("/api/track/roi/clear")
+def clear_arena():
+    tracker.clear_arena()
+    return {"ok": True}
 
 
 # --- closed loop -----------------------------------------------------------
@@ -445,6 +466,29 @@ def set_irradiance(i: IrradianceIn):
     if i.channel in config.OPTO_IRRADIANCE_MW_CM2:
         config.OPTO_IRRADIANCE_MW_CM2[i.channel] = i.mw_cm2
     return {"ok": True, "irradiance": config.OPTO_IRRADIANCE_MW_CM2}
+
+
+class DataDirIn(BaseModel):
+    path: str | None = None
+
+
+@app.post("/api/datadir")
+def set_datadir(d: DataDirIn):
+    """Set ONE data folder for everything: presets go to <root>/presets and
+    sessions (video+csv+config) to <root>/recordings."""
+    if d.path:
+        root = os.path.expanduser(d.path)
+        try:
+            os.makedirs(root, exist_ok=True)
+        except Exception as e:
+            return {"ok": False, "error": f"cannot create {root}: {e}"}
+        presets.set_dir(os.path.join(root, "presets"))
+        session.set_base_dir(os.path.join(root, "recordings"))
+    else:
+        presets.set_dir(None)
+        session.set_base_dir(None)
+    return {"ok": True, "presets_dir": presets.current_dir(),
+            "sessions_dir": session.base_dir}
 
 
 # --- scheduler (timed experiment plan) ------------------------------------

@@ -3,6 +3,9 @@
 A preset captures the full behavioral configuration — per-channel protocols,
 trigger zones, proximity settings, tracking parameters, and camera specs — so an
 experiment can be reproduced exactly later.
+
+The storage directory is settable at runtime (set_dir) so presets can live in a
+user-chosen data folder alongside session recordings.
 """
 from __future__ import annotations
 
@@ -12,7 +15,18 @@ import json
 
 from config import PRESETS_DIR
 
-os.makedirs(PRESETS_DIR, exist_ok=True)
+_DIR = PRESETS_DIR
+os.makedirs(_DIR, exist_ok=True)
+
+
+def set_dir(path: str | None):
+    global _DIR
+    _DIR = os.path.expanduser(path) if path else PRESETS_DIR
+    os.makedirs(_DIR, exist_ok=True)
+
+
+def current_dir() -> str:
+    return _DIR
 
 
 def _safe(name: str) -> str:
@@ -20,7 +34,7 @@ def _safe(name: str) -> str:
 
 
 def _path(name: str) -> str:
-    return os.path.join(PRESETS_DIR, _safe(name) + ".json")
+    return os.path.join(_DIR, _safe(name) + ".json")
 
 
 def save(name: str, data: dict) -> str:
@@ -40,7 +54,9 @@ def load(name: str):
 
 
 def list_presets():
-    return sorted(f[:-5] for f in os.listdir(PRESETS_DIR) if f.endswith(".json"))
+    if not os.path.isdir(_DIR):
+        return []
+    return sorted(f[:-5] for f in os.listdir(_DIR) if f.endswith(".json"))
 
 
 def delete(name: str) -> bool:
