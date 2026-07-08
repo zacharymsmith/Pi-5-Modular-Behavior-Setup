@@ -265,11 +265,20 @@
       <label style="margin-top:10px">Detection method (compare per arena)</label>
       <div class="inline" style="gap:8px">
         <select id="method" onchange="setTrack()" style="flex:1">
+          <option value="tophat">Illumination-invariant (recommended)</option>
           <option value="threshold">Threshold (Otsu / manual)</option>
           <option value="bgsub">Background subtraction (moving flies)</option>
           <option value="adaptive">Adaptive (uneven lighting)</option>
         </select>
         <button class="ghost sm" onclick="resetBG()">Reset BG</button>
+      </div>
+      <div class="slider" style="margin-top:8px">
+        <label>Feature size</label><input id="tophat" type="range" min="9" max="81" step="2" value="25" oninput="setTrack()">
+        <span class="val" id="tophatVal">25</span>
+      </div>
+      <div class="slider">
+        <label>Coast frames</label><input id="maxmiss" type="range" min="0" max="45" value="12" oninput="setTrack()">
+        <span class="val" id="maxmissVal">12</span>
       </div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
@@ -385,10 +394,12 @@ function flashOpto(){post('/api/opto/flash',{channel:$('channel').value,intensit
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
   $('maxareaVal').textContent=$('maxarea').value;$('trailLenVal').textContent=$('trailLen').value;
   $('thresh').disabled=$('autoThr').checked;
+  $('tophatVal').textContent=$('tophat').value;$('maxmissVal').textContent=$('maxmiss').value;
   post('/api/track',{enabled:$('trackEn').checked,method:$('method').value,
     auto_threshold:$('autoThr').checked,
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
-    max_area:+$('maxarea').value,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+    max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
+    trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
 function autoTune(){post('/api/track/autotune').then(r=>{
   if(!r.ok){$('tuneInfo').textContent=r.error;return;}
@@ -574,6 +585,8 @@ async function refresh(){
     $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;$('thresh').disabled=s.tracker.auto_threshold;
     $('minarea').value=s.tracker.min_area;$('minareaVal').textContent=s.tracker.min_area;
     $('maxarea').value=s.tracker.max_area;$('maxareaVal').textContent=s.tracker.max_area;
+    $('tophat').value=s.tracker.tophat_kernel;$('tophatVal').textContent=s.tracker.tophat_kernel;
+    $('maxmiss').value=s.tracker.max_missed;$('maxmissVal').textContent=s.tracker.max_missed;
     $('invert').checked=s.tracker.invert;
     $('trailsEn').checked=s.tracker.trails;
     $('trailLen').value=s.tracker.trail_len;$('trailLenVal').textContent=s.tracker.trail_len;

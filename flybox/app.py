@@ -63,6 +63,8 @@ class TrackIn(BaseModel):
     invert: bool | None = None
     min_area: int | None = None
     max_area: int | None = None
+    tophat_kernel: int | None = None
+    max_missed: int | None = None
     bgsub_var: int | None = None
     adaptive_block: int | None = None
     adaptive_C: int | None = None
@@ -268,6 +270,10 @@ def set_track(t: TrackIn):
         tracker.min_area = t.min_area
     if t.max_area is not None:
         tracker.max_area = t.max_area
+    if t.tophat_kernel is not None:
+        tracker.tophat_kernel = t.tophat_kernel
+    if t.max_missed is not None:
+        tracker.max_missed = t.max_missed
     if t.trails is not None:
         tracker.trails = t.trails
         if not t.trails:
@@ -392,6 +398,7 @@ def _gather_config() -> dict:
         "tracker": {"method": tracker.method, "threshold": tracker.threshold,
                     "invert": tracker.invert, "auto_threshold": tracker.auto_threshold,
                     "min_area": tracker.min_area, "max_area": tracker.max_area,
+                    "tophat_kernel": tracker.tophat_kernel, "max_missed": tracker.max_missed,
                     "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
                     "adaptive_C": tracker.adaptive_C,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
@@ -415,7 +422,8 @@ def _apply_config(d: dict):
         loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
     for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
-              "bgsub_var", "adaptive_block", "adaptive_C", "trails", "trail_len"):
+              "tophat_kernel", "max_missed", "bgsub_var", "adaptive_block", "adaptive_C",
+              "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     cam = d.get("camera", {})

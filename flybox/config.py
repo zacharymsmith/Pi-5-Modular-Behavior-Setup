@@ -66,6 +66,8 @@ TRACK_MIN_AREA = 4             # px; ignore blobs smaller than this
 TRACK_MAX_AREA = 4000          # px; ignore blobs bigger than this (e.g. arena/reflections)
 TRACK_MAX_BLOBS = 10           # cap detections per frame
 TRACK_MATCH_DIST_PX = 90       # max px a fly can move between frames to keep its ID
+TRACK_TOPHAT_KERNEL = 25       # px; ~2x fly body length (illumination-invariant method)
+TRACK_MAX_MISSED = 12          # frames to coast a track through a detection gap (keeps ID)
 
 # ---------------------------------------------------------------------------
 # Spatial calibration

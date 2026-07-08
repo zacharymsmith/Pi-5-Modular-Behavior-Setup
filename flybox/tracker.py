@@ -19,7 +19,7 @@ import numpy as np
 
 from config import (TRACK_THRESHOLD, TRACK_INVERT, TRACK_MIN_AREA, TRACK_MAX_AREA,
                     TRACK_MAX_BLOBS, TRACK_MATCH_DIST_PX, TRACK_AUTO_THRESHOLD,
-                    TRAIL_ENABLED, TRAIL_LENGTH)
+                    TRACK_TOPHAT_KERNEL, TRACK_MAX_MISSED, TRAIL_ENABLED, TRAIL_LENGTH)
 
 _ID_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
               (0, 255, 255), (200, 100, 255), (120, 255, 120), (255, 255, 0)]
@@ -29,11 +29,12 @@ _KERNEL = np.ones((3, 3), np.uint8)
 @dataclass
 class Tracker:
     enabled: bool = False
-    method: str = "threshold"    # "threshold" | "bgsub" | "adaptive"
+    method: str = "tophat"       # "tophat" | "threshold" | "bgsub" | "adaptive"
     auto_threshold: bool = TRACK_AUTO_THRESHOLD
     threshold: int = TRACK_THRESHOLD
     invert: bool = TRACK_INVERT
     blur: bool = True
+    tophat_kernel: int = TRACK_TOPHAT_KERNEL   # feature size for illumination-invariant method
     bgsub_var: int = 25          # MOG2 sensitivity (lower = more sensitive)
     adaptive_block: int = 51     # adaptive-threshold neighborhood (odd)
     adaptive_C: int = 5          # adaptive-threshold offset
@@ -42,6 +43,7 @@ class Tracker:
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
     match_dist: int = TRACK_MATCH_DIST_PX
+    max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
     computed_threshold: int = TRACK_THRESHOLD
@@ -93,7 +95,16 @@ class Tracker:
         if self.blur:
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
         mode = cv2.THRESH_BINARY_INV if self.invert else cv2.THRESH_BINARY
-        if self.method == "bgsub":
+        if self.method == "tophat":
+            # remove large-scale illumination + rim glow, keep the small fly.
+            # black-hat isolates dark spots on a bright bg; top-hat the reverse.
+            k = max(9, int(self.tophat_kernel) | 1)
+            ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+            op = cv2.MORPH_BLACKHAT if self.invert else cv2.MORPH_TOPHAT
+            feat = cv2.morphologyEx(gray, op, ker)
+            _, th = cv2.threshold(feat, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+            self.computed_threshold = 0
+        elif self.method == "bgsub":
             # moving foreground vs learned static background — ignores fixed
             # rim shadows/reflections, which is ideal for cluttered arenas.
             if self._bgsub is None:
@@ -173,11 +184,23 @@ class Tracker:
                 vx = a * (x - best["x"]) + (1 - a) * best.get("vx", 0.0)
                 vy = a * (y - best["y"]) + (1 - a) * best.get("vy", 0.0)
                 tracks.append({"id": best["id"], "x": x, "y": y, "vx": vx, "vy": vy,
-                               "speed": (vx * vx + vy * vy) ** 0.5})
+                               "speed": (vx * vx + vy * vy) ** 0.5,
+                               "missed": 0, "coasting": False})
             else:
-                tracks.append({"id": self._next_id, "x": x, "y": y,
-                               "vx": 0.0, "vy": 0.0, "speed": 0.0})
+                tracks.append({"id": self._next_id, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
+                               "speed": 0.0, "missed": 0, "coasting": False})
                 self._next_id += 1
+        # coast unmatched previous tracks through the gap (holds identity + trigger)
+        for p in prev:
+            if p["id"] in used:
+                continue
+            missed = p.get("missed", 0) + 1
+            if missed > self.max_missed:
+                continue
+            vx, vy = p.get("vx", 0.0) * 0.85, p.get("vy", 0.0) * 0.85
+            tracks.append({"id": p["id"], "x": int(round(p["px"])), "y": int(round(p["py"])),
+                           "vx": vx, "vy": vy, "speed": (vx * vx + vy * vy) ** 0.5,
+                           "missed": missed, "coasting": True})
         return tracks
 
     def process(self, frame_bgr):
@@ -200,16 +223,17 @@ class Tracker:
 
         live_ids = {t["id"] for t in tracks}
         for t in tracks:
-            col = _ID_COLORS[t["id"] % len(_ID_COLORS)]
+            coasting = t.get("coasting", False)
+            col = (140, 140, 140) if coasting else _ID_COLORS[t["id"] % len(_ID_COLORS)]
             if self.trails:
                 dq = self._trailmap.setdefault(t["id"], deque(maxlen=self.trail_len))
                 if dq.maxlen != self.trail_len:
                     dq = deque(dq, maxlen=self.trail_len)
                     self._trailmap[t["id"]] = dq
                 dq.append((t["x"], t["y"]))
-            cv2.circle(annotated, (t["x"], t["y"]), 10, col, 2)
-            cv2.putText(annotated, str(t["id"]), (t["x"] + 8, t["y"] - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+            cv2.circle(annotated, (t["x"], t["y"]), 10, col, 1 if coasting else 2)
+            cv2.putText(annotated, str(t["id"]) + ("?" if coasting else ""),
+                        (t["x"] + 8, t["y"] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
         for gid in [k for k in self._trailmap if k not in live_ids]:
             if not self.trails:
                 self._trailmap.pop(gid, None)
@@ -235,6 +259,7 @@ class Tracker:
                 "auto_threshold": self.auto_threshold,
                 "threshold": self.threshold, "computed_threshold": self.computed_threshold,
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
+                "tophat_kernel": self.tophat_kernel, "max_missed": self.max_missed,
                 "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
                 "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,
