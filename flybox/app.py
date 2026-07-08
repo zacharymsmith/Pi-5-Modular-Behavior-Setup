@@ -86,6 +86,30 @@ class PresetIn(BaseModel):
     name: str
 
 
+class PresetSaveIn(BaseModel):
+    name: str
+    sections: list[str] | None = None   # None = everything
+
+
+# which config keys belong to each user-facing section
+SECTION_KEYS = {
+    "stim": ["protocols"],
+    "tracking": ["tracker"],
+    "triggers": ["zones", "proximity", "cooldown_s"],
+    "camera": ["camera"],
+    "calibration": ["calibration"],
+}
+
+
+def _filter_config(cfg: dict, sections) -> dict:
+    if not sections:
+        return cfg
+    keep = set()
+    for s in sections:
+        keep.update(SECTION_KEYS.get(s, []))
+    return {k: v for k, v in cfg.items() if k in keep}
+
+
 class SessionStartIn(BaseModel):
     name: str = "session"
     save_dir: str | None = None
@@ -421,6 +445,7 @@ def _gather_config() -> dict:
                     "clahe": tracker.clahe,
                     "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
                     "adaptive_C": tracker.adaptive_C,
+                    "roi": tracker.roi,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
         "camera": {"width": s["size"][0], "height": s["size"][1],
                    "fps": s["target_fps"], **s["controls"]},
@@ -430,9 +455,10 @@ def _gather_config() -> dict:
 def _apply_config(d: dict):
     for ch, p in d.get("protocols", {}).items():
         loop.set_protocol(Protocol(**p))
-    loop.clear_zones()
-    for z in d.get("zones", []):
-        loop.add_zone(*z["roi"], z.get("channel", "red"), z.get("shape", "rect"))
+    if "zones" in d:                     # only touch zones if the preset has them
+        loop.clear_zones()
+        for z in d["zones"]:
+            loop.add_zone(*z["roi"], z.get("channel", "red"), z.get("shape", "rect"))
     px = d.get("proximity", {})
     if px:
         loop.set_proximity(px.get("enabled"), px.get("distance_px"), px.get("channel"))
@@ -446,6 +472,12 @@ def _apply_config(d: dict):
               "adaptive_C", "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
+    if "roi" in tk:                      # arena ROI (rebuild mask on load)
+        r = tk["roi"]
+        if r:
+            tracker.set_arena(r["x1"], r["y1"], r["x2"], r["y2"], r.get("shape", "ellipse"))
+        else:
+            tracker.clear_arena()
     cam = d.get("camera", {})
     if cam:
         camera.apply_config(
@@ -461,8 +493,10 @@ def list_presets():
 
 
 @app.post("/api/presets/save")
-def save_preset(p: PresetIn):
-    name = presets.save(p.name, _gather_config())
+def save_preset(p: PresetSaveIn):
+    data = _filter_config(_gather_config(), p.sections)
+    data["_sections"] = p.sections or list(SECTION_KEYS.keys())
+    name = presets.save(p.name, data)
     return {"ok": True, "name": name, "presets": presets.list_presets()}
 
 
