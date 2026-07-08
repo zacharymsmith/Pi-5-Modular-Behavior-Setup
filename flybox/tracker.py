@@ -29,10 +29,15 @@ _KERNEL = np.ones((3, 3), np.uint8)
 @dataclass
 class Tracker:
     enabled: bool = False
+    method: str = "threshold"    # "threshold" | "bgsub" | "adaptive"
     auto_threshold: bool = TRACK_AUTO_THRESHOLD
     threshold: int = TRACK_THRESHOLD
     invert: bool = TRACK_INVERT
     blur: bool = True
+    bgsub_var: int = 25          # MOG2 sensitivity (lower = more sensitive)
+    adaptive_block: int = 51     # adaptive-threshold neighborhood (odd)
+    adaptive_C: int = 5          # adaptive-threshold offset
+    _bgsub: object = None
     min_area: int = TRACK_MIN_AREA
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
@@ -79,17 +84,35 @@ class Tracker:
         return m
 
     # ---- segmentation --------------------------------------------------
+    def reset_bg(self):
+        """Re-learn the background model (for the background-subtraction method)."""
+        self._bgsub = None
+
     def _binarize(self, frame_bgr):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         if self.blur:
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
         mode = cv2.THRESH_BINARY_INV if self.invert else cv2.THRESH_BINARY
-        if self.auto_threshold:
-            val, th = cv2.threshold(gray, 0, 255, mode | cv2.THRESH_OTSU)
-            self.computed_threshold = int(val)
-        else:
-            _, th = cv2.threshold(gray, int(self.threshold), 255, mode)
-            self.computed_threshold = int(self.threshold)
+        if self.method == "bgsub":
+            # moving foreground vs learned static background — ignores fixed
+            # rim shadows/reflections, which is ideal for cluttered arenas.
+            if self._bgsub is None:
+                self._bgsub = cv2.createBackgroundSubtractorMOG2(
+                    history=200, varThreshold=int(self.bgsub_var), detectShadows=False)
+            fg = self._bgsub.apply(gray)
+            _, th = cv2.threshold(fg, 127, 255, cv2.THRESH_BINARY)
+        elif self.method == "adaptive":
+            # local threshold — robust to uneven illumination (bright centre / dark edge).
+            blk = int(self.adaptive_block) | 1        # force odd
+            th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       mode, max(3, blk), int(self.adaptive_C))
+        else:  # threshold (Otsu or manual)
+            if self.auto_threshold:
+                val, th = cv2.threshold(gray, 0, 255, mode | cv2.THRESH_OTSU)
+                self.computed_threshold = int(val)
+            else:
+                _, th = cv2.threshold(gray, int(self.threshold), 255, mode)
+                self.computed_threshold = int(self.threshold)
         th = cv2.morphologyEx(th, cv2.MORPH_OPEN, _KERNEL)
         mask = self._get_mask(th.shape[1], th.shape[0])   # limit to arena ROI
         if mask is not None:
@@ -191,7 +214,7 @@ class Tracker:
             if not self.trails:
                 self._trailmap.pop(gid, None)
 
-        tag = f"{len(tracks)} tracked  (thr {self.computed_threshold}{'*' if self.auto_threshold else ''})"
+        tag = f"{len(tracks)} tracked · {self.method}"
         cv2.putText(annotated, tag, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 230, 0), 2)
         return annotated, tracks
 
@@ -208,9 +231,12 @@ class Tracker:
         self._trailmap.clear()
 
     def settings(self):
-        return {"enabled": self.enabled, "auto_threshold": self.auto_threshold,
+        return {"enabled": self.enabled, "method": self.method,
+                "auto_threshold": self.auto_threshold,
                 "threshold": self.threshold, "computed_threshold": self.computed_threshold,
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
+                "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
+                "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,
                 "roi": self.roi, "has_roi": self.roi is not None,
                 "count": len(self.tracks)}

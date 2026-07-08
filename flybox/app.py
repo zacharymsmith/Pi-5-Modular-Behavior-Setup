@@ -57,11 +57,15 @@ class RawChannelIn(BaseModel):
 
 class TrackIn(BaseModel):
     enabled: bool | None = None
+    method: str | None = None
     auto_threshold: bool | None = None
     threshold: int | None = None
     invert: bool | None = None
     min_area: int | None = None
     max_area: int | None = None
+    bgsub_var: int | None = None
+    adaptive_block: int | None = None
+    adaptive_C: int | None = None
     trails: bool | None = None
     trail_len: int | None = None
 
@@ -245,6 +249,15 @@ def record_stop():
 def set_track(t: TrackIn):
     if t.enabled is not None:
         tracker.enabled = t.enabled
+    if t.method is not None:
+        tracker.method = t.method
+    if t.bgsub_var is not None:
+        tracker.bgsub_var = t.bgsub_var
+        tracker.reset_bg()
+    if t.adaptive_block is not None:
+        tracker.adaptive_block = t.adaptive_block
+    if t.adaptive_C is not None:
+        tracker.adaptive_C = t.adaptive_C
     if t.auto_threshold is not None:
         tracker.auto_threshold = t.auto_threshold
     if t.threshold is not None:
@@ -290,6 +303,12 @@ def set_arena(a: ArenaIn):
 @app.post("/api/track/roi/clear")
 def clear_arena():
     tracker.clear_arena()
+    return {"ok": True}
+
+
+@app.post("/api/track/reset_bg")
+def reset_bg():
+    tracker.reset_bg()
     return {"ok": True}
 
 
@@ -370,9 +389,11 @@ def _gather_config() -> dict:
                       "channel": loop.proximity["channel"]},
         "cooldown_s": loop.cooldown_s,
         "calibration": loop.mm_per_px,
-        "tracker": {"threshold": tracker.threshold, "invert": tracker.invert,
-                    "auto_threshold": tracker.auto_threshold,
+        "tracker": {"method": tracker.method, "threshold": tracker.threshold,
+                    "invert": tracker.invert, "auto_threshold": tracker.auto_threshold,
                     "min_area": tracker.min_area, "max_area": tracker.max_area,
+                    "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
+                    "adaptive_C": tracker.adaptive_C,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
         "camera": {"width": s["size"][0], "height": s["size"][1],
                    "fps": s["target_fps"], **s["controls"]},
@@ -393,8 +414,8 @@ def _apply_config(d: dict):
     if "calibration" in d:
         loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
-    for k in ("auto_threshold", "threshold", "invert", "min_area", "max_area",
-              "trails", "trail_len"):
+    for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
+              "bgsub_var", "adaptive_block", "adaptive_C", "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     cam = d.get("camera", {})

@@ -121,6 +121,7 @@
           <button class="ghost sm" onclick="clearZones()">Clear zones</button>
         </div>
         <div class="drawhint" id="drawHint">Drag on the video to draw.</div>
+        <div id="zoneList" style="margin-top:8px"><small class="hint">No zones yet.</small></div>
       </div>
       <div class="rowbtns">
         <button class="green" onclick="rec(true)">● Record</button>
@@ -163,10 +164,6 @@
         <label>Cooldown</label><input id="cooldown" type="range" min="0" max="10" step="0.5" value="2" oninput="setLoop()">
         <span class="val" id="cooldownVal">2 s</span>
       </div>
-
-      <div class="divider"></div>
-      <div class="kv"><span><b>Trigger zones</b></span><button class="ghost sm" onclick="clearZones()">Clear all</button></div>
-      <div id="zoneList"><small class="hint">No zones yet — drag on the video.</small></div>
 
       <div class="divider"></div>
       <label class="switch"><input type="checkbox" id="proxEn" onchange="setProx()">
@@ -256,6 +253,15 @@
         <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
       <div class="rowbtns"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
         <small class="hint" id="tuneInfo"></small></div>
+      <label style="margin-top:10px">Detection method (compare per arena)</label>
+      <div class="inline" style="gap:8px">
+        <select id="method" onchange="setTrack()" style="flex:1">
+          <option value="threshold">Threshold (Otsu / manual)</option>
+          <option value="bgsub">Background subtraction (moving flies)</option>
+          <option value="adaptive">Adaptive (uneven lighting)</option>
+        </select>
+        <button class="ghost sm" onclick="resetBG()">Reset BG</button>
+      </div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
       <div class="slider" style="margin-top:8px">
@@ -361,9 +367,11 @@ function flashOpto(){post('/api/opto/flash',{channel:$('channel').value,intensit
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
   $('maxareaVal').textContent=$('maxarea').value;$('trailLenVal').textContent=$('trailLen').value;
   $('thresh').disabled=$('autoThr').checked;
-  post('/api/track',{enabled:$('trackEn').checked,auto_threshold:$('autoThr').checked,
+  post('/api/track',{enabled:$('trackEn').checked,method:$('method').value,
+    auto_threshold:$('autoThr').checked,
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
     max_area:+$('maxarea').value,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+function resetBG(){post('/api/track/reset_bg');}
 function autoTune(){post('/api/track/autotune').then(r=>{
   if(!r.ok){$('tuneInfo').textContent=r.error;return;}
   $('tuneInfo').textContent=`thr ${r.threshold}, ${r.invert?'dark':'light'} subject, found ${r.detected}`;
@@ -452,8 +460,9 @@ function initSeg(id,cb){const seg=$(id);seg.querySelectorAll('button').forEach(b
     b.classList.add('on');cb(b.dataset.v);});});}
 initSeg('segTarget',v=>{drawTarget=v;updateHint();});
 initSeg('segShape',v=>{drawShape=v;updateHint();});
-function updateHint(){const t=drawTarget==='arena'?'arena mask (limits tracking)':drawTarget+' trigger zone';
-  $('drawHint').textContent=`Drag on the video to draw the ${t} as ${drawShape==='ellipse'?'an ellipse':'a rectangle'}.`;}
+function updateHint(){const t=drawTarget==='arena'?'arena mask':drawTarget+' zone';
+  const how=drawShape==='ellipse'?'click the centre, drag outward to the edge':'drag a box corner-to-corner';
+  $('drawHint').textContent=`${t} — ${how}.`;}
 function drawColor(){return drawTarget==='arena'?'#ffff00':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
 
 const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
@@ -462,14 +471,18 @@ window.addEventListener('resize',fit);
 function pos(e){const r=cv.getBoundingClientRect();
   return {x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height};}
 function rubber(a,b){ctx.clearRect(0,0,cv.width,cv.height);ctx.strokeStyle=drawColor();ctx.lineWidth=2;
-  if(drawShape==='ellipse'){ctx.beginPath();
-    ctx.ellipse((a.x+b.x)/2,(a.y+b.y)/2,Math.abs(b.x-a.x)/2,Math.abs(b.y-a.y)/2,0,0,7);ctx.stroke();}
+  if(drawShape==='ellipse'){                       // centre-anchored: a = centre (fixed)
+    ctx.beginPath();ctx.ellipse(a.x,a.y,Math.abs(b.x-a.x),Math.abs(b.y-a.y),0,0,7);ctx.stroke();
+    ctx.fillStyle=drawColor();ctx.beginPath();ctx.arc(a.x,a.y,2.5,0,7);ctx.fill();}
   else ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));}
 cv.addEventListener('mousedown',e=>{fit();drag=pos(e);});
 cv.addEventListener('mousemove',e=>{if(drag)rubber(drag,pos(e));});
-cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);
-  const nx1=drag.x/cv.width,ny1=drag.y/cv.height,nx2=p.x/cv.width,ny2=p.y/cv.height;drag=null;
-  setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
+cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2;
+  if(drawShape==='ellipse'){const rx=Math.abs(p.x-drag.x),ry=Math.abs(p.y-drag.y);
+    x1=drag.x-rx;y1=drag.y-ry;x2=drag.x+rx;y2=drag.y+ry;}   // box from centre+radius
+  else {x1=drag.x;y1=drag.y;x2=p.x;y2=p.y;}
+  drag=null;setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
+  const nx1=x1/cv.width,ny1=y1/cv.height,nx2=x2/cv.width,ny2=y2/cv.height;
   if(Math.abs(nx2-nx1)<0.02||Math.abs(ny2-ny1)<0.02)return;
   if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
   else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
@@ -538,6 +551,7 @@ async function refresh(){
     $('mockEn').checked=s.camera.mock;
     // tracking
     $('trackEn').checked=s.tracker.enabled;
+    $('method').value=s.tracker.method;
     $('autoThr').checked=s.tracker.auto_threshold;
     $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;$('thresh').disabled=s.tracker.auto_threshold;
     $('minarea').value=s.tracker.min_area;$('minareaVal').textContent=s.tracker.min_area;
