@@ -74,6 +74,8 @@
   .seg button.on{background:var(--accent);color:#fff}
   .seg button:not(.on):hover{background:#222a38;color:var(--fg)}
   .drawhint{font-size:12px;color:var(--muted);margin-top:2px}
+  .chk{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);cursor:pointer}
+  .chk input{width:15px;height:15px;accent-color:var(--accent)}
   .badge{display:inline-block;width:8px;height:8px;border-radius:50%;background:#556;margin-right:6px}
   .badge.ok{background:var(--green)} .badge.mock{background:var(--amber)}
   .tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700}
@@ -226,7 +228,16 @@
         <button class="sm" onclick="loadPreset()">Load</button>
         <button class="sm" onclick="deletePreset()">Delete</button>
       </div>
-      <div class="inline" style="gap:8px;margin-top:10px">
+      <div style="margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Include when saving</div>
+      <div class="inline" style="gap:14px;flex-wrap:wrap;margin-top:5px">
+        <label class="chk"><input type="checkbox" class="psec" value="stim" checked> Stim</label>
+        <label class="chk"><input type="checkbox" class="psec" value="tracking" checked> Tracking+arena</label>
+        <label class="chk"><input type="checkbox" class="psec" value="triggers" checked> Zones/prox</label>
+        <label class="chk"><input type="checkbox" class="psec" value="camera" checked> Camera</label>
+        <label class="chk"><input type="checkbox" class="psec" value="calibration" checked> Calibration</label>
+      </div>
+      <small class="hint">Tick only what you want — e.g. Stim alone to reuse a protocol on a different arena.</small>
+      <div class="inline" style="gap:8px;margin-top:8px">
         <input id="presetName" placeholder="new preset name" style="flex:1">
         <button class="primary sm" onclick="savePreset()">Save current</button>
       </div>
@@ -436,7 +447,9 @@ async function refreshPresets(){const r=await fetch('/api/presets').then(x=>x.js
   sel.innerHTML=(r.presets.length?r.presets:['']).map(p=>`<option value="${p}">${p||'(none saved)'}</option>`).join('');
   if(cur)sel.value=cur;}
 function savePreset(){const n=$('presetName').value.trim();if(!n){alert('Name the preset first');return;}
-  post('/api/presets/save',{name:n}).then(()=>{$('presetName').value='';refreshPresets();});}
+  const secs=[...document.querySelectorAll('.psec:checked')].map(c=>c.value);
+  if(!secs.length){alert('Tick at least one section to save');return;}
+  post('/api/presets/save',{name:n,sections:secs}).then(()=>{$('presetName').value='';refreshPresets();});}
 function loadPreset(){const n=$('presetSel').value;if(!n)return;
   post('/api/presets/load',{name:n}).then(()=>{built=false;refresh();});}
 function deletePreset(){const n=$('presetSel').value;if(!n)return;
