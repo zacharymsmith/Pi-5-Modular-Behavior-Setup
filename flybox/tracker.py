@@ -49,14 +49,19 @@ class Tracker:
     _mask_shape: object = None
 
     # ---- arena ROI (limit tracking to inside the dish) -----------------
-    def set_arena(self, nx1, ny1, nx2, ny2):
-        self.roi = {"cx": (nx1 + nx2) / 2, "cy": (ny1 + ny2) / 2,
-                    "rx": abs(nx2 - nx1) / 2, "ry": abs(ny2 - ny1) / 2}
+    def set_arena(self, nx1, ny1, nx2, ny2, shape="ellipse"):
+        x1, x2 = sorted((nx1, nx2))
+        y1, y2 = sorted((ny1, ny2))
+        self.roi = {"shape": shape, "x1": x1, "y1": y1, "x2": x2, "y2": y2}
         self._mask = None
 
     def clear_arena(self):
         self.roi = None
         self._mask = None
+
+    def _roi_px(self, w, h):
+        r = self.roi
+        return (int(r["x1"] * w), int(r["y1"] * h), int(r["x2"] * w), int(r["y2"] * h))
 
     def _get_mask(self, w, h):
         if self.roi is None:
@@ -64,9 +69,12 @@ class Tracker:
         if self._mask is not None and self._mask_shape == (h, w):
             return self._mask
         m = np.zeros((h, w), np.uint8)
-        cv2.ellipse(m, (int(self.roi["cx"] * w), int(self.roi["cy"] * h)),
-                    (max(1, int(self.roi["rx"] * w)), max(1, int(self.roi["ry"] * h))),
-                    0, 0, 360, 255, -1)
+        x1, y1, x2, y2 = self._roi_px(w, h)
+        if self.roi["shape"] == "rect":
+            cv2.rectangle(m, (x1, y1), (x2, y2), 255, -1)
+        else:
+            cv2.ellipse(m, ((x1 + x2) // 2, (y1 + y2) // 2),
+                        (max(1, (x2 - x1) // 2), max(1, (y2 - y1) // 2)), 0, 0, 360, 255, -1)
         self._mask, self._mask_shape = m, (h, w)
         return m
 
@@ -153,9 +161,13 @@ class Tracker:
         annotated = frame_bgr.copy()
         if self.roi is not None:   # show the arena boundary
             h, w = annotated.shape[:2]
-            cv2.ellipse(annotated, (int(self.roi["cx"] * w), int(self.roi["cy"] * h)),
-                        (int(self.roi["rx"] * w), int(self.roi["ry"] * h)),
-                        0, 0, 360, (255, 255, 0), 1)
+            x1, y1, x2, y2 = self._roi_px(w, h)
+            if self.roi["shape"] == "rect":
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 255, 0), 1)
+            else:
+                cv2.ellipse(annotated, ((x1 + x2) // 2, (y1 + y2) // 2),
+                            (max(1, (x2 - x1) // 2), max(1, (y2 - y1) // 2)),
+                            0, 0, 360, (255, 255, 0), 1)
         if self.trails:
             self._draw_trails(annotated)
 

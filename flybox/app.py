@@ -121,6 +121,7 @@ class ZoneIn(BaseModel):
     nx2: float
     ny2: float
     channel: str = "red"
+    shape: str = "rect"
 
 
 class ZoneRemoveIn(BaseModel):
@@ -277,11 +278,12 @@ class ArenaIn(BaseModel):
     ny1: float
     nx2: float
     ny2: float
+    shape: str = "ellipse"
 
 
 @app.post("/api/track/roi")
 def set_arena(a: ArenaIn):
-    tracker.set_arena(a.nx1, a.ny1, a.nx2, a.ny2)
+    tracker.set_arena(a.nx1, a.ny1, a.nx2, a.ny2, a.shape)
     return {"ok": True, "tracker": tracker.settings()}
 
 
@@ -303,7 +305,7 @@ def set_loop(l: LoopIn):
 
 @app.post("/api/loop/zone")
 def add_zone(z: ZoneIn):
-    zid = loop.add_zone(z.nx1, z.ny1, z.nx2, z.ny2, z.channel)
+    zid = loop.add_zone(z.nx1, z.ny1, z.nx2, z.ny2, z.channel, z.shape)
     return {"ok": True, "id": zid, "loop": loop.status()}
 
 
@@ -382,7 +384,7 @@ def _apply_config(d: dict):
         loop.set_protocol(Protocol(**p))
     loop.clear_zones()
     for z in d.get("zones", []):
-        loop.add_zone(*z["roi"], z["channel"])
+        loop.add_zone(*z["roi"], z.get("channel", "red"), z.get("shape", "rect"))
     px = d.get("proximity", {})
     if px:
         loop.set_proximity(px.get("enabled"), px.get("distance_px"), px.get("channel"))

@@ -69,12 +69,17 @@ class ClosedLoop:
         # zone triggers (+ enter/exit occupancy logging)
         for z in self.zones:
             x1, y1, x2, y2 = self._roi_px(z["roi"], w, h)
+            shape = z.get("shape", "rect")
             col = _CHAN_COLOR.get(z["channel"], (200, 200, 200))
             draw = col if self.enabled else (110, 110, 110)
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), draw, 2)
+            if shape == "ellipse":
+                cv2.ellipse(annotated, ((x1 + x2) // 2, (y1 + y2) // 2),
+                            (max(1, (x2 - x1) // 2), max(1, (y2 - y1) // 2)), 0, 0, 360, draw, 2)
+            else:
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), draw, 2)
             cv2.putText(annotated, f"{z['channel']} #{z['id']}", (x1 + 4, max(y1 - 6, 12)),
                         _FONT, 0.5, draw, 1)
-            occ = {t["id"] for t in tracks if x1 <= t["x"] <= x2 and y1 <= t["y"] <= y2}
+            occ = {t["id"] for t in tracks if self._pt_in(shape, x1, y1, x2, y2, t["x"], t["y"])}
             prev = self._zone_occ.get(z["id"], set())
             if session.running:
                 for i in occ - prev:
@@ -165,6 +170,14 @@ class ClosedLoop:
         return x1, y1, x2, y2
 
     @staticmethod
+    def _pt_in(shape, x1, y1, x2, y2, px, py):
+        if shape == "ellipse":
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            rx, ry = max(1, (x2 - x1) / 2), max(1, (y2 - y1) / 2)
+            return ((px - cx) / rx) ** 2 + ((py - cy) / ry) ** 2 <= 1.0
+        return x1 <= px <= x2 and y1 <= py <= y2
+
+    @staticmethod
     def _close_pairs(pts, d):
         out, dd = [], d * d
         for i in range(len(pts)):
@@ -175,9 +188,9 @@ class ClosedLoop:
         return out
 
     # ---- config from the UI -------------------------------------------
-    def add_zone(self, nx1, ny1, nx2, ny2, channel="red"):
+    def add_zone(self, nx1, ny1, nx2, ny2, channel="red", shape="rect"):
         z = {"id": self._next_id, "roi": (float(nx1), float(ny1), float(nx2), float(ny2)),
-             "channel": channel, "_last": 0.0}
+             "channel": channel, "shape": shape, "_last": 0.0}
         self.zones.append(z)
         self._next_id += 1
         return z["id"]
@@ -214,8 +227,8 @@ class ClosedLoop:
             "enabled": self.enabled,
             "cooldown_s": self.cooldown_s,
             "mm_per_px": self.mm_per_px,
-            "zones": [{"id": z["id"], "roi": z["roi"], "channel": z["channel"]}
-                      for z in self.zones],
+            "zones": [{"id": z["id"], "roi": z["roi"], "channel": z["channel"],
+                       "shape": z.get("shape", "rect")} for z in self.zones],
             "proximity": {"enabled": self.proximity["enabled"],
                           "distance_px": self.proximity["distance_px"],
                           "distance_mm": self._mm(self.proximity["distance_px"]),

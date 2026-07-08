@@ -61,6 +61,16 @@
   .kv{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:var(--muted)}
   .kv b{color:var(--fg)}
   .divider{height:1px;background:var(--line);margin:14px 0}
+  .drawtools{margin-top:12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .drawrow{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .drawrow:last-of-type{margin-bottom:0}
+  .drawlab{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:46px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:0;border-radius:0;background:transparent;padding:7px 13px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--accent);color:#fff}
+  .seg button:not(.on):hover{background:#222a38;color:var(--fg)}
+  .drawhint{font-size:12px;color:var(--muted);margin-top:2px}
   .badge{display:inline-block;width:8px;height:8px;border-radius:50%;background:#556;margin-right:6px}
   .badge.ok{background:var(--green)} .badge.mock{background:var(--amber)}
   .tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700}
@@ -92,15 +102,27 @@
         <img id="preview" src="/stream.mjpg" alt="live preview">
         <canvas id="roiCanvas"></canvas>
       </div>
-      <div class="rowbtns">
-        <label class="switch"><input type="checkbox" id="roiMode">
-          <span class="track"><span class="knob"></span></span> Draw <b style="color:#ff0">arena ROI</b> (track only inside)</label>
-        <button class="ghost sm" onclick="clearArena()">Clear ROI</button>
+      <div class="drawtools">
+        <div class="drawrow">
+          <span class="drawlab">Draw</span>
+          <div class="seg" id="segTarget">
+            <button type="button" data-v="arena" class="on">Arena</button>
+            <button type="button" data-v="red">Red zone</button>
+            <button type="button" data-v="blue">Blue zone</button>
+          </div>
+        </div>
+        <div class="drawrow">
+          <span class="drawlab">Shape</span>
+          <div class="seg" id="segShape">
+            <button type="button" data-v="ellipse" class="on">◯ Ellipse</button>
+            <button type="button" data-v="rect">▭ Rectangle</button>
+          </div>
+          <button class="ghost sm" onclick="clearArena()">Clear arena</button>
+          <button class="ghost sm" onclick="clearZones()">Clear zones</button>
+        </div>
+        <div class="drawhint" id="drawHint">Drag on the video to draw.</div>
       </div>
       <div class="rowbtns">
-        <span class="inline"><small class="hint">new zone:</small>
-          <select id="zoneChan" style="padding:6px"><option value="red">red</option><option value="blue">blue</option></select>
-        </span>
         <button class="green" onclick="rec(true)">● Record</button>
         <button class="red" onclick="rec(false)">■ Stop</button>
       </div>
@@ -423,30 +445,38 @@ function selfTest(){post('/api/selftest').then(r=>{
   if(r&&r.tuned)$('tuneInfo').textContent=`self-test: found ${r.tuned.detected} sim flies`;
   built=false;refresh();});}
 
-// ROI drag -> add a zone for the selected channel
+// ---- drawing toolbar + accurate ROI/zone drawing ----
+let drawTarget='arena', drawShape='ellipse';
+function initSeg(id,cb){const seg=$(id);seg.querySelectorAll('button').forEach(b=>{
+  b.addEventListener('click',()=>{seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');cb(b.dataset.v);});});}
+initSeg('segTarget',v=>{drawTarget=v;updateHint();});
+initSeg('segShape',v=>{drawShape=v;updateHint();});
+function updateHint(){const t=drawTarget==='arena'?'arena mask (limits tracking)':drawTarget+' trigger zone';
+  $('drawHint').textContent=`Drag on the video to draw the ${t} as ${drawShape==='ellipse'?'an ellipse':'a rectangle'}.`;}
+function drawColor(){return drawTarget==='arena'?'#ffff00':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
+
 const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
-function fit(){const r=$('preview').getBoundingClientRect();cv.width=r.width;cv.height=r.height;}
+function fit(){const r=$('preview').getBoundingClientRect();cv.width=Math.round(r.width);cv.height=Math.round(r.height);}
 window.addEventListener('resize',fit);
-function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function pos(e){const r=cv.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height};}
+function rubber(a,b){ctx.clearRect(0,0,cv.width,cv.height);ctx.strokeStyle=drawColor();ctx.lineWidth=2;
+  if(drawShape==='ellipse'){ctx.beginPath();
+    ctx.ellipse((a.x+b.x)/2,(a.y+b.y)/2,Math.abs(b.x-a.x)/2,Math.abs(b.y-a.y)/2,0,0,7);ctx.stroke();}
+  else ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));}
 cv.addEventListener('mousedown',e=>{fit();drag=pos(e);});
-cv.addEventListener('mousemove',e=>{if(!drag)return;const p=pos(e);
-  ctx.clearRect(0,0,cv.width,cv.height);
-  ctx.strokeStyle=$('roiMode').checked?'#ffff00':($('zoneChan').value==='red'?'#e5484d':'#3aa0ff');
-  ctx.lineWidth=2;
-  if($('roiMode').checked){ctx.beginPath();
-    ctx.ellipse((drag.x+p.x)/2,(drag.y+p.y)/2,Math.abs(p.x-drag.x)/2,Math.abs(p.y-drag.y)/2,0,0,7);ctx.stroke();}
-  else ctx.strokeRect(drag.x,drag.y,p.x-drag.x,p.y-drag.y);});
+cv.addEventListener('mousemove',e=>{if(drag)rubber(drag,pos(e));});
 cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);
   const nx1=drag.x/cv.width,ny1=drag.y/cv.height,nx2=p.x/cv.width,ny2=p.y/cv.height;drag=null;
-  setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),400);
-  if(Math.abs(nx2-nx1)>0.02&&Math.abs(ny2-ny1)>0.02){
-    if($('roiMode').checked) post('/api/track/roi',{nx1,ny1,nx2,ny2}).then(refresh);
-    else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:$('zoneChan').value}).then(refresh);
-  }});
+  setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
+  if(Math.abs(nx2-nx1)<0.02||Math.abs(ny2-ny1)<0.02)return;
+  if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
+  else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
 function clearArena(){post('/api/track/roi/clear').then(refresh);}
 
 // status
-let built=false;
+let built=false, lastCamKey='';
 function proto1(p){return `${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.train_duration_s}s`;}
 async function refresh(){
   let s;try{s=await fetch('/api/status').then(r=>r.json());}catch(e){return;}
@@ -459,6 +489,10 @@ async function refresh(){
   // only warn / offer retry when there's NO real camera (not for the test toggle)
   $('camMsg').textContent=s.camera.camera_present?'':s.camera.message;
   $('camRetry').style.display=s.camera.camera_present?'none':'inline-block';
+  // match the preview box to the real video aspect so drawing clicks are exact
+  const pw=document.querySelector('.previewWrap'), cs=s.camera.size;
+  if(cs&&cs[0]&&cs[1]){const key=cs[0]+'x'+cs[1];
+    if(key!==lastCamKey){lastCamKey=key;pw.style.aspectRatio=cs[0]+' / '+cs[1];setTimeout(fit,60);}}
   $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
   $('optoStat').className='statline'+(s.opto.running?' on':'');
   $('trackCount').textContent=s.tracker.count;
@@ -488,9 +522,9 @@ async function refresh(){
   // zones list
   const zl=$('zoneList');
   zl.innerHTML=s.loop.zones.length?s.loop.zones.map(z=>
-    `<div class="zone"><span><span class="tag ${z.channel}">${z.channel}</span> zone #${z.id}</span>
+    `<div class="zone"><span><span class="tag ${z.channel}">${z.channel}</span> ${z.shape||'rect'} #${z.id}</span>
      <button class="ghost sm" onclick="removeZone(${z.id})">remove</button></div>`).join(''):
-    '<small class="hint">No zones yet — drag on the video.</small>';
+    '<small class="hint">No zones yet — use the Draw tools above.</small>';
   if(!built){
     $('channel').innerHTML=s.opto_channels.map(c=>`<option>${c}</option>`).join('');
     $('lights').innerHTML=s.light_names.map(n=>`
@@ -522,7 +556,7 @@ async function refresh(){
     fit();built=true;
   }
 }
-updateDuty();refresh();refreshPresets();setInterval(refresh,1200);
+updateDuty();updateHint();refresh();refreshPresets();setInterval(refresh,1200);
 window.addEventListener('load',fit);
 </script>
 </body>
