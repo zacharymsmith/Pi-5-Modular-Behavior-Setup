@@ -169,14 +169,21 @@ fi
 if [ "$MODE" = "run" ] && [ "$REBOOT_NEEDED" -eq 0 ]; then
   echo
   info "Launching FlyBox at http://$(hostname -I | awk '{print $1}'):8000  (Ctrl-C to stop)"
-  # auto-open the browser once the server is accepting connections
+  # auto-open the browser (maximized, clean app window) once the server is up
   ( for _ in $(seq 1 60); do
       (exec 3<>/dev/tcp/localhost/8000) 2>/dev/null && { exec 3>&- ; break; }
       sleep 0.3
     done
-    for b in xdg-open sensible-browser chromium-browser firefox; do
-      command -v "$b" >/dev/null 2>&1 && { "$b" "http://localhost:8000" >/dev/null 2>&1 & break; }
-    done ) &
+    URL="http://localhost:8000"
+    if command -v chromium-browser >/dev/null 2>&1; then
+      chromium-browser --start-maximized --app="$URL" >/dev/null 2>&1 &
+    elif command -v chromium >/dev/null 2>&1; then
+      chromium --start-maximized --app="$URL" >/dev/null 2>&1 &
+    else
+      for b in xdg-open sensible-browser firefox; do
+        command -v "$b" >/dev/null 2>&1 && { "$b" "$URL" >/dev/null 2>&1 & break; }
+      done
+    fi ) &
   cd "$APP_DIR" && exec python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 elif [ "$MODE" = "run" ]; then
   echo -e "\n${Y}Reboot first, then: bash setup.sh run${N}"

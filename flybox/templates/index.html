@@ -20,6 +20,9 @@
   .chip{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
         padding:4px 10px;border-radius:999px}
   .chip b{color:var(--fg)}
+  .zoomctl{display:flex;align-items:center;gap:6px;margin-left:10px}
+  .zoomctl button{padding:5px 10px;font-size:14px;font-weight:700}
+  .zoomctl span{font-size:12px;color:var(--muted);min-width:40px;text-align:center}
   main{display:grid;grid-template-columns:minmax(420px,1.1fr) 1fr;gap:18px;padding:18px;max-width:1500px;margin:0 auto}
   @media(max-width:1000px){main{grid-template-columns:1fr}}
   .col{display:flex;flex-direction:column;gap:18px}
@@ -89,6 +92,12 @@
     <span class="chip" id="chipCam" title="">camera —</span>
     <span class="chip" id="chipPca">PCA9685 —</span>
     <span class="chip" id="chipFps">— fps</span>
+  </div>
+  <div class="zoomctl">
+    <button onclick="zoomBy(-0.1)" title="smaller">A−</button>
+    <span id="zoomLbl">100%</span>
+    <button onclick="zoomBy(0.1)" title="larger">A+</button>
+    <button onclick="zoomReset()" title="reset">⟲</button>
   </div>
 </header>
 
@@ -351,6 +360,15 @@
 const $=id=>document.getElementById(id);
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},
                           body:b?JSON.stringify(b):null}).then(r=>r.json());
+
+// ---- UI zoom (persists across restarts; great for large Pi Connect displays) ----
+let uiZoom=parseFloat(localStorage.getItem('flyzoom')||'1')||1;
+function applyZoom(){document.body.style.zoom=uiZoom;localStorage.setItem('flyzoom',uiZoom);
+  const l=$('zoomLbl');if(l)l.textContent=Math.round(uiZoom*100)+'%';
+  setTimeout(()=>{try{fit();}catch(e){}},60);}
+function zoomBy(d){uiZoom=Math.min(2.5,Math.max(0.6,Math.round((uiZoom+d)*10)/10));applyZoom();}
+function zoomReset(){uiZoom=1;applyZoom();}
+applyZoom();
 
 // opto
 function updateDuty(){const f=+$('freq').value,pw=+$('pw').value;const d=f>0?(pw/(1000/f)*100):100;
