@@ -65,7 +65,8 @@ a pip numpy breaks picamera2's binary compatibility.
 ## Remote access
 - **LAN:** `http://<pi-ip>:8000` or `http://raspberrypi.local:8000`
 - **Pi Connect:** remote/off-site without firewall setup
-- **AP mode:** Pi broadcasts its own WiFi; connect and open the same URL
+- **AP mode (parked):** concurrent hotspot on the built-in radio proved unreliable; use a
+  USB Wi-Fi dongle if you need a self-contained hotspot. See `../hotspot.sh`.
 
 ## Safety before running LEDs
 See `../HARDWARE_AND_SOFTWARE_GUIDE.md` §8: barrel polarity, common ground, PicoBuck
@@ -76,11 +77,15 @@ Each experiment session writes a self-contained folder under `recordings/`:
 
 ```
 recordings/20260707_143012_myassay/
-  config.json   # full setup: protocols, zones, proximity, tracking, camera, calibration, git commit
-  events.csv    # every stimulation: t_s, source (zone/proximity/scheduler), channel, protocol, dose_mJ_cm2
-  tracks.csv    # per-frame centroids: t_s, frame, id, x_px, y_px, x_mm, y_mm
-  *.mp4         # the recording
+  config.json     # full setup + git commit + end-of-run SUMMARY (per-fly stats, stim counts, dose)
+  events.csv      # stimulations + zone enter/exit: t_s, source, channel, protocol, dose_mJ_cm2, detail
+  tracks.csv      # per-frame trajectories: t_s, frame, id, x/y (px & mm), vx/vy, speed
+  trajectory.png  # rendered per-fly trajectory plot
+  *.mp4           # the recording
 ```
+
+The `summary` in config.json includes, per identified fly: points, path length (px & mm),
+mean/max speed (px/s & mm/s), plus per-channel stimulation counts and total light dose.
 
 Set the mm/px calibration and per-channel irradiance (mW/cm²) so distances log in mm and
 stimulation logs actual light dose. Save a **preset** to reproduce the whole setup later.

@@ -81,6 +81,23 @@ class OptoController:
         c = self._chan.get(channel)
         return bool(c and c.running)
 
+    def flash(self, channel: str, intensity: float = 1.0, seconds: float = 0.5) -> str | None:
+        """Quick manual pulse to verify an LED — briefly on, then off."""
+        if channel not in OPTO_CHANNELS:
+            return f"Unknown channel '{channel}'."
+        if self.is_running(channel):
+            return f"{channel} is running a protocol."
+        lvl = max(0.0, min(OPTO_MAX_INTENSITY, float(intensity)))
+        secs = max(0.05, min(OPTO_MAX_TRAIN_S, float(seconds)))
+
+        def _flash():
+            pca.set(OPTO_CHANNELS[channel], lvl)
+            time.sleep(secs)
+            pca.set(OPTO_CHANNELS[channel], 0.0)
+
+        threading.Thread(target=_flash, daemon=True).start()
+        return None
+
     def stop(self, channel: str | None = None):
         names = [channel] if channel else list(self._chan)
         for n in names:

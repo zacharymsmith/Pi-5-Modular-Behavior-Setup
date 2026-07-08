@@ -137,7 +137,25 @@ class ProximityIn(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open(os.path.join(TEMPLATES, "index.html")) as f:
-        return f.read()
+        html = f.read()
+    # no-store so a browser never serves a stale UI after an app restart
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@app.post("/api/selftest")
+def selftest():
+    """One-click known-good state: mock feed + tracking + a centered zone + armed,
+    auto-tuned. Lets you verify the whole pipeline without live flies."""
+    camera.set_mock(True)
+    tracker.enabled = True
+    tracker.auto_threshold = True
+    loop.clear_zones()
+    loop.add_zone(0.3, 0.3, 0.7, 0.7, "red")
+    loop.enabled = True
+    frame = camera.latest_frame()
+    tuned = tracker.auto_tune(frame) if frame is not None else {}
+    return {"ok": True, "tuned": tuned, "tracker": tracker.settings(),
+            "loop": loop.status()}
 
 
 @app.get("/stream.mjpg")
@@ -175,6 +193,18 @@ def opto_run(p: ProtocolIn):
 def opto_stop():
     opto.stop()
     return {"ok": True}
+
+
+class FlashIn(BaseModel):
+    channel: str = "red"
+    intensity: float = 1.0
+    seconds: float = 0.4
+
+
+@app.post("/api/opto/flash")
+def opto_flash(f: FlashIn):
+    err = opto.flash(f.channel, f.intensity, f.seconds)
+    return {"ok": err is None, "error": err}
 
 
 # --- illumination ----------------------------------------------------------
@@ -316,9 +346,11 @@ def _gather_config() -> dict:
                       "distance_px": loop.proximity["distance_px"],
                       "channel": loop.proximity["channel"]},
         "cooldown_s": loop.cooldown_s,
+        "calibration": loop.mm_per_px,
         "tracker": {"threshold": tracker.threshold, "invert": tracker.invert,
-                    "min_area": tracker.min_area, "trails": tracker.trails,
-                    "trail_len": tracker.trail_len},
+                    "auto_threshold": tracker.auto_threshold,
+                    "min_area": tracker.min_area, "max_area": tracker.max_area,
+                    "trails": tracker.trails, "trail_len": tracker.trail_len},
         "camera": {"width": s["size"][0], "height": s["size"][1],
                    "fps": s["target_fps"], **s["controls"]},
     }
@@ -335,8 +367,11 @@ def _apply_config(d: dict):
         loop.set_proximity(px.get("enabled"), px.get("distance_px"), px.get("channel"))
     if "cooldown_s" in d:
         loop.cooldown_s = d["cooldown_s"]
+    if "calibration" in d:
+        loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
-    for k in ("threshold", "invert", "min_area", "trails", "trail_len"):
+    for k in ("auto_threshold", "threshold", "invert", "min_area", "max_area",
+              "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     cam = d.get("camera", {})

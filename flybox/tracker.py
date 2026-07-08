@@ -91,22 +91,31 @@ class Tracker:
         n = len(self._detect(frame_bgr))
         return {"invert": self.invert, "threshold": int(val), "detected": n}
 
-    # ---- identity association ------------------------------------------
+    # ---- identity association (velocity-predicted -> fewer ID swaps) ----
     def _assign(self, pts):
-        prev, tracks, used = list(self._prev), [], set()
+        prev = list(self._prev)
+        for p in prev:  # predict where each fly should be this frame
+            p["px"] = p["x"] + p.get("vx", 0.0)
+            p["py"] = p["y"] + p.get("vy", 0.0)
+        tracks, used = [], set()
+        a = 0.5  # velocity smoothing
         for (x, y) in pts:
             best, bestd = None, self.match_dist ** 2
             for p in prev:
                 if p["id"] in used:
                     continue
-                d = (x - p["x"]) ** 2 + (y - p["y"]) ** 2
+                d = (x - p["px"]) ** 2 + (y - p["py"]) ** 2   # match to prediction
                 if d < bestd:
                     best, bestd = p, d
             if best is not None:
                 used.add(best["id"])
-                tracks.append({"id": best["id"], "x": x, "y": y})
+                vx = a * (x - best["x"]) + (1 - a) * best.get("vx", 0.0)
+                vy = a * (y - best["y"]) + (1 - a) * best.get("vy", 0.0)
+                tracks.append({"id": best["id"], "x": x, "y": y, "vx": vx, "vy": vy,
+                               "speed": (vx * vx + vy * vy) ** 0.5})
             else:
-                tracks.append({"id": self._next_id, "x": x, "y": y})
+                tracks.append({"id": self._next_id, "x": x, "y": y,
+                               "vx": 0.0, "vy": 0.0, "speed": 0.0})
                 self._next_id += 1
         return tracks
 

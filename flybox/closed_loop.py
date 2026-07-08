@@ -48,6 +48,7 @@ class ClosedLoop:
         self._heat = np.zeros((_HEAT_H, _HEAT_W), np.float32)
         self._prev_count = 0
         self._prev_min_dist = None
+        self._zone_occ = {}   # zone id -> set of fly ids currently inside
 
     # ---- per-frame -----------------------------------------------------
     def on_frame(self, frame_bgr):
@@ -65,7 +66,7 @@ class ClosedLoop:
             self._heat[gy, gx] += 1.0
         self.min_dist_px = self._min_dist(pts)
 
-        # zone triggers
+        # zone triggers (+ enter/exit occupancy logging)
         for z in self.zones:
             x1, y1, x2, y2 = self._roi_px(z["roi"], w, h)
             col = _CHAN_COLOR.get(z["channel"], (200, 200, 200))
@@ -73,7 +74,15 @@ class ClosedLoop:
             cv2.rectangle(annotated, (x1, y1), (x2, y2), draw, 2)
             cv2.putText(annotated, f"{z['channel']} #{z['id']}", (x1 + 4, max(y1 - 6, 12)),
                         _FONT, 0.5, draw, 1)
-            if self.enabled and any(x1 <= px <= x2 and y1 <= py <= y2 for px, py in pts):
+            occ = {t["id"] for t in tracks if x1 <= t["x"] <= x2 and y1 <= t["y"] <= y2}
+            prev = self._zone_occ.get(z["id"], set())
+            if session.running:
+                for i in occ - prev:
+                    session.log_event("zone-enter", z["channel"], {}, f"zone#{z['id']} id{i}")
+                for i in prev - occ:
+                    session.log_event("zone-exit", z["channel"], {}, f"zone#{z['id']} id{i}")
+            self._zone_occ[z["id"]] = occ
+            if self.enabled and occ:
                 self._fire(z["channel"], z, f"zone#{z['id']}", annotated, (x1, y1, x2, y2))
 
         # proximity trigger (merge-aware: two flies often fuse into one blob at

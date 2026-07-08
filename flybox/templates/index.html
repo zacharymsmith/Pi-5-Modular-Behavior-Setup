@@ -102,6 +102,8 @@
       <div class="statline" id="recinfo">not recording</div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="mockEn" onchange="setMock()">
         <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
+      <div class="rowbtns"><button class="primary sm" onclick="selfTest()">🧪 Self-test (sim flies)</button>
+        <small class="hint">turns on mock + tracking + a centre zone, armed & auto-tuned</small></div>
       <div class="statline warn" id="camMsg"></div>
       <div class="rowbtns"><button class="ghost sm" id="camRetry" style="display:none" onclick="retryCam()">↻ Retry camera</button></div>
       <details>
@@ -208,6 +210,7 @@
       <div class="rowbtns">
         <button class="primary" onclick="runOpto()">▶ Run</button>
         <button class="red" onclick="stopOpto()">⏹ Stop</button>
+        <button class="sm" onclick="flashOpto()">⚡ Test flash</button>
         <small class="hint" id="duty">duty —</small>
       </div>
       <div class="statline" id="optoStat">idle</div>
@@ -318,6 +321,7 @@ function protoObj(){return{frequency_hz:+$('freq').value,pulse_width_ms:+$('pw')
   channel:$('channel').value,intensity:+$('intensity').value};}
 async function runOpto(){const r=await post('/api/opto/run',protoObj());if(!r.ok)$('optoStat').textContent='⚠ '+r.error;}
 function stopOpto(){post('/api/opto/stop');}
+function flashOpto(){post('/api/opto/flash',{channel:$('channel').value,intensity:+$('intensity').value,seconds:0.4});}
 
 // tracking
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
@@ -401,6 +405,9 @@ async function rec(on){const r=await post(on?'/api/record/start':'/api/record/st
   $('recinfo').className='statline'+(on?' on':'');}
 function retryCam(){post('/api/camera/retry').then(refresh);}
 function setMock(){post('/api/camera/mock',{enabled:$('mockEn').checked});}
+function selfTest(){post('/api/selftest').then(r=>{
+  if(r&&r.tuned)$('tuneInfo').textContent=`self-test: found ${r.tuned.detected} sim flies`;
+  built=false;refresh();});}
 
 // ROI drag -> add a zone for the selected channel
 const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
