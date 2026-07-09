@@ -151,12 +151,13 @@
       <details>
         <summary>Camera options</summary>
         <div class="grid3" style="margin-top:10px">
-          <div><label>Resolution</label><select id="camRes">
-            <option value="640x480">640×480</option>
+          <div><label>Resolution (HQ cam modes)</label><select id="camRes" onchange="capFps()">
+            <option value="640x480">640×480 · fast</option>
             <option value="1024x768">1024×768</option>
-            <option value="1280x720">1280×720</option>
-            <option value="1640x1232">1640×1232</option>
-            <option value="1920x1080">1920×1080</option>
+            <option value="1332x990">1332×990 · native (≤120 fps)</option>
+            <option value="2028x1080">2028×1080 · native (≤50 fps)</option>
+            <option value="2028x1520">2028×1520 · native (≤40 fps)</option>
+            <option value="4056x3040">4056×3040 · full (≤10 fps)</option>
           </select></div>
           <div><label>FPS</label><input id="camFps" type="number" value="30" min="1" max="120"></div>
           <div style="align-self:end"><label class="switch"><input type="checkbox" id="camAuto" checked onchange="camAutoToggle()">
@@ -165,7 +166,7 @@
           <div><label>Gain</label><input id="camGain" type="number" value="1" min="1" max="16" step="0.1" disabled></div>
           <div style="align-self:end"><button class="sm" onclick="applyCam()">Apply</button></div>
         </div>
-        <small class="hint">Resolution change reconfigures the camera — stop recording first.</small>
+        <small class="hint">Resolution change reconfigures the camera — stop recording first. FPS is capped by the sensor mode, by exposure (e.g. 33000µs ⇒ ≤30 fps), and by CPU (lower res + lighter detection = higher fps).</small>
         <div class="rowbtns" style="margin-top:10px">
           <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
@@ -370,11 +371,13 @@
       </div>
       <label style="margin-top:8px">Notes</label>
       <input id="sessNotes" placeholder="conditions, temperature, etc.">
-      <div class="inline" style="gap:8px;margin-top:10px">
+      <label class="chk" style="margin-top:10px"><input type="checkbox" id="sessArm" checked> Arm closed loop when I start</label>
+      <div class="inline" style="gap:8px;margin-top:8px">
         <input id="sessName" placeholder="session name" style="flex:1">
-        <button class="green sm" onclick="sessionStart()">Start</button>
-        <button class="red sm" onclick="sessionStop()">Stop</button>
+        <button class="green sm" onclick="sessionStart()">▶ Start</button>
+        <button class="red sm" onclick="sessionStop()">■ Stop</button>
       </div>
+      <small class="hint">Start records video + events.csv + tracks.csv together (and arms the loop if ticked).</small>
       <div class="kv" style="margin-top:10px"><span>Status</span><b id="sessStat">idle</b></div>
       <div class="kv"><span>Events / track rows</span><b id="sessCounts">0 / 0</b></div>
       <div class="kv"><span>Folder</span><b id="sessDir" style="font-size:11px">—</b></div>
@@ -473,6 +476,9 @@ function autoTune(){post('/api/track/autotune').then(r=>{
 
 // camera options
 function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('camGain').disabled=a;}
+const MODE_FPS={"640x480":50,"1024x768":40,"1332x990":120,"2028x1080":50,"2028x1520":40,"4056x3040":10};
+function capFps(){const m=MODE_FPS[$('camRes').value]||30;$('camFps').max=m;
+  if(+$('camFps').value>m)$('camFps').value=m;}
 function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
   post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
     exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
@@ -513,8 +519,10 @@ function resetHeat(){post('/api/analytics/reset');}
 function sessionStart(){post('/api/session/start',{name:$('sessName').value||'session',
   save_dir:$('sessDirIn').value||null,experimenter:$('sessExp').value||null,
   genotype:$('sessGeno').value||null,notes:$('sessNotes').value||null}).then(r=>{
-    if(!r.ok)alert(r.error);});}
-function sessionStop(){post('/api/session/stop');}
+    if(!r.ok){alert(r.error);return;}
+    if($('sessArm').checked){$('loopEn').checked=true;setLoop();}});}
+function sessionStop(){post('/api/session/stop');
+  if($('sessArm').checked){$('loopEn').checked=false;setLoop();}}
 
 // scheduler phase builder
 let phases=[];
@@ -639,6 +647,9 @@ async function refresh(){
   $('schedStat').className='statline'+(sc.running?' on':'');
   if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
   if(s.camera.brightness!=null) $('brightVal').textContent=s.camera.brightness;
+  // keep illumination sliders showing the ACTUAL light levels (unless being dragged)
+  document.querySelectorAll('#lights input[data-light]').forEach(inp=>{
+    if(document.activeElement!==inp){const v=s.lights[inp.dataset.light]; if(v!=null) inp.value=v;}});
   if(maskShown) $('maskimg').src='/api/track/mask.jpg?t='+Date.now();
   // refresh heatmap (cache-bust)
   $('heat').src='/api/analytics/heatmap.jpg?t='+Date.now();
@@ -652,7 +663,7 @@ async function refresh(){
     $('channel').innerHTML=s.opto_channels.map(c=>`<option>${c}</option>`).join('');
     $('lights').innerHTML=s.light_names.map(n=>`
       <div class="slider"><label>${n}</label>
-      <input type="range" min="0" max="1" step="0.01" value="0" oninput="setLight('${n}',this.value)"></div>`).join('');
+      <input type="range" data-light="${n}" min="0" max="1" step="0.01" value="0" oninput="setLight('${n}',this.value)"></div>`).join('');
     // reflect server proximity/cooldown once
     $('cooldown').value=s.loop.cooldown_s;$('cooldownVal').textContent=s.loop.cooldown_s+' s';
     $('proxEn').checked=s.loop.proximity.enabled;
