@@ -45,6 +45,9 @@ class Camera:
         self.recording = False
         self.record_path = None
         self._writer = None
+        self._writer2 = None            # optional annotated (overlays burned in) video
+        self.record_annotated = False
+        self._rec_lock = threading.Lock()   # guards writer access across threads
         self.force_mock = False
         self.frame_cb = None
         self._brightness = 0.0
@@ -164,14 +167,18 @@ class Camera:
                     except Exception:
                         annotated = frame
                 ov = self.overlay.get("enabled")
-                if self.recording and self._writer is not None:
-                    self._rec_frame += 1
-                    # recorded = raw frame + info overlay only (no tracking markers)
-                    rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame
-                    self._writer.write(rec)
+                # display / annotated frame = tracking markers + info overlay
                 disp = annotated
                 if ov:
                     disp = self._draw_overlay(annotated.copy(), recording=self.recording)
+                # write video under a lock so Stop can't free the writer mid-write (segfault)
+                with self._rec_lock:
+                    if self.recording and self._writer is not None:
+                        self._rec_frame += 1
+                        rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame
+                        self._writer.write(rec)
+                        if self._writer2 is not None:
+                            self._writer2.write(disp)   # annotated version (all overlays)
                 preview = cv2.resize(disp, PREVIEW_SIZE)
                 self._brightness = float(preview.mean())   # live scene brightness 0..255
                 ok, buf = cv2.imencode(".jpg", preview,
@@ -214,22 +221,18 @@ class Camera:
         if not lines:
             return img
         h, w = img.shape[:2]
-        scale = max(0.4, w / 1600.0)
-        font, thick = cv2.FONT_HERSHEY_SIMPLEX, 1
-        sizes = [cv2.getTextSize(t, font, scale, thick)[0] for t in lines]
-        lineh = int(max(s[1] for s in sizes) * 1.9)
-        boxw = max(s[0] for s in sizes) + 14
-        boxh = lineh * len(lines) + 8
+        scale = max(0.5, w / 1500.0)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        sizes = [cv2.getTextSize(t, font, scale, 2)[0] for t in lines]
+        lineh = int(max(s[1] for s in sizes) * 2.0)
+        boxw = max(s[0] for s in sizes)
         corner = o.get("corner", "tl")
-        x0 = 6 if "l" in corner else max(0, w - boxw - 6)
-        y0 = 6 if "t" in corner else max(0, h - boxh - 6)
-        sub = img[y0:y0 + boxh, x0:x0 + boxw]
-        if sub.size:
-            dark = np.zeros_like(sub)
-            cv2.addWeighted(dark, 0.45, sub, 0.55, 0, sub)
-        y = y0 + lineh - 4
+        x0 = 10 if "l" in corner else max(4, w - boxw - 10)
+        y = lineh if "t" in corner else h - lineh * (len(lines) - 1) - int(lineh * 0.3)
         for t in lines:
-            cv2.putText(img, t, (x0 + 7, y), font, scale, (60, 255, 140), thick, cv2.LINE_AA)
+            # black outline + colored fill -> readable on any background, no box tint
+            cv2.putText(img, t, (x0, y), font, scale, (0, 0, 0), max(3, int(5 * scale)), cv2.LINE_AA)
+            cv2.putText(img, t, (x0, y), font, scale, (60, 255, 140), max(1, int(2 * scale)), cv2.LINE_AA)
             y += lineh
         return img
 
@@ -324,22 +327,35 @@ class Camera:
         # file plays back too fast (the loop runs slower than the camera fps).
         rec_fps = round(self._fps_est, 1) if self._fps_est > 1 else self.fps
         self._record_fps = rec_fps
-        self._writer = cv2.VideoWriter(self.record_path, fourcc, rec_fps, tuple(self.size))
-        if not self._writer.isOpened():
-            self._writer = None
-            return "Could not open the video writer (codec missing?)."
-        self._rec_frame = 0
-        self._rec_t0 = time.time()
-        self.recording = True
+        with self._rec_lock:
+            self._writer = cv2.VideoWriter(self.record_path, fourcc, rec_fps, tuple(self.size))
+            if not self._writer.isOpened():
+                self._writer = None
+                return "Could not open the video writer (codec missing?)."
+            self._writer2 = None
+            if self.record_annotated:
+                apath = self.record_path[:-4] + "_annotated.mp4"
+                self._writer2 = cv2.VideoWriter(apath, fourcc, rec_fps, tuple(self.size))
+                if not self._writer2.isOpened():
+                    self._writer2 = None
+            self._rec_frame = 0
+            self._rec_t0 = time.time()
+            self.recording = True
         return None
 
     def stop_recording(self) -> str:
-        if not self.recording:
-            return ""
-        self.recording = False
-        if self._writer is not None:
-            self._writer.release()
-            self._writer = None
+        with self._rec_lock:
+            if not self.recording:
+                return ""
+            self.recording = False
+            for wname in ("_writer", "_writer2"):
+                w = getattr(self, wname)
+                if w is not None:
+                    try:
+                        w.release()
+                    except Exception:
+                        pass
+                    setattr(self, wname, None)
         return self.record_path or ""
 
     def status(self):
@@ -356,6 +372,7 @@ class Camera:
             "controls": dict(self.controls),
             "brightness": round(self._brightness, 1),
             "overlay": dict(self.overlay),
+            "record_annotated": self.record_annotated,
         }
 
 

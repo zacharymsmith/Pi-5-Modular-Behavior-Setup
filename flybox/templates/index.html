@@ -138,6 +138,8 @@
         <button class="green" onclick="rec(true)">● Record</button>
         <button class="red" onclick="rec(false)">■ Stop</button>
       </div>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="recAnno" onchange="setRecOpts()">
+        <span class="track"><span class="knob"></span></span> Also save an annotated copy (tracking + overlays)</label>
       <div class="statline" id="recinfo">not recording</div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="mockEn" onchange="setMock()">
         <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
@@ -462,6 +464,7 @@ function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('
 function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
   post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
     exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
+function setRecOpts(){post('/api/camera/record_opts',{record_annotated:$('recAnno').checked});}
 function setOverlay(){post('/api/camera/overlay',{enabled:$('ovEnabled').checked,title:$('ovTitle').value,
   show_datetime:$('ovDate').checked,show_elapsed:$('ovElapsed').checked,show_frame:$('ovFrame').checked,
   show_fps:$('ovFps').checked,corner:$('ovCorner').value});}
@@ -666,6 +669,7 @@ async function refresh(){
     $('ovEnabled').checked=ov.enabled;$('ovTitle').value=ov.title||'';
     $('ovDate').checked=ov.show_datetime;$('ovElapsed').checked=ov.show_elapsed;
     $('ovFrame').checked=ov.show_frame;$('ovFps').checked=ov.show_fps;$('ovCorner').value=ov.corner||'tl';
+    $('recAnno').checked=s.camera.record_annotated;
     $('mmpp').value=s.loop.mm_per_px||'';
     camAutoToggle();phActToggle();
     fit();built=true;

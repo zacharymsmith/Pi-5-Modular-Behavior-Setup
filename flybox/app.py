@@ -430,6 +430,16 @@ def camera_overlay(o: OverlayIn):
     return {"ok": True, "overlay": camera.set_overlay(**o.dict())}
 
 
+class RecOptIn(BaseModel):
+    record_annotated: bool
+
+
+@app.post("/api/camera/record_opts")
+def camera_record_opts(r: RecOptIn):
+    camera.record_annotated = r.record_annotated
+    return {"ok": True, "record_annotated": camera.record_annotated}
+
+
 @app.post("/api/camera/autoexpose")
 def camera_autoexpose():
     """Auto-set exposure/gain to hit a good brightness INSIDE the arena ROI, then
