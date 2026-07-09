@@ -70,6 +70,8 @@ TRACK_TOPHAT_KERNEL = 25       # px; ~2x fly body length (illumination-invariant
 TRACK_MAX_MISSED = 12          # frames to coast a track through a detection gap (keeps ID)
 TRACK_CONFIRM_FRAMES = 4       # a new blob must persist this many frames before it gets an ID
 TRACK_EXPECTED_FLIES = 0       # cap on reported flies (0 = unlimited); e.g. 1 for single-fly assays
+TRACK_DETECT_MAX_W = 0         # downscale detection to this width (0 = full res); lets you
+                               # record hi-res while tracking fast (e.g. 800)
 
 # ---------------------------------------------------------------------------
 # Spatial calibration

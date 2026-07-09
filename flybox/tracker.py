@@ -20,7 +20,7 @@ import numpy as np
 from config import (TRACK_THRESHOLD, TRACK_INVERT, TRACK_MIN_AREA, TRACK_MAX_AREA,
                     TRACK_MAX_BLOBS, TRACK_MATCH_DIST_PX, TRACK_AUTO_THRESHOLD,
                     TRACK_TOPHAT_KERNEL, TRACK_MAX_MISSED, TRACK_CONFIRM_FRAMES,
-                    TRACK_EXPECTED_FLIES, TRAIL_ENABLED, TRAIL_LENGTH)
+                    TRACK_EXPECTED_FLIES, TRACK_DETECT_MAX_W, TRAIL_ENABLED, TRAIL_LENGTH)
 
 _ID_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
               (0, 255, 255), (200, 100, 255), (120, 255, 120), (255, 255, 0)]
@@ -50,6 +50,7 @@ class Tracker:
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
     confirm_frames: int = TRACK_CONFIRM_FRAMES # new blob must persist this long to become a track
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
+    detect_max_w: int = TRACK_DETECT_MAX_W     # downscale detection to this width (0 = full res)
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
     computed_threshold: int = TRACK_THRESHOLD
@@ -128,7 +129,7 @@ class Tracker:
             self._ref[y1:y2, x1:x2] = gray[y1:y2, x1:x2]
         return {"ok": True}
 
-    def _binarize(self, frame_bgr):
+    def _binarize(self, frame_bgr, scale=1.0):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         if self.blur:
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -138,12 +139,15 @@ class Tracker:
             gray = self._clahe.apply(gray)
         mode = cv2.THRESH_BINARY_INV if self.invert else cv2.THRESH_BINARY
         if self.method == "refsub":
-            # difference from a captured empty-arena reference — colour/lighting
-            # proof, keeps stationary flies. Capture the background first.
-            if self._ref is None or self._ref.shape != gray.shape:
+            # difference from a captured reference — colour/lighting proof, keeps
+            # stationary flies. Reference is resized to match the detection frame.
+            if self._ref is None:
                 th = np.zeros(gray.shape, np.uint8)
             else:
-                diff = cv2.absdiff(gray, self._ref)
+                ref = self._ref
+                if ref.shape != gray.shape:
+                    ref = cv2.resize(ref, (gray.shape[1], gray.shape[0]))
+                diff = cv2.absdiff(gray, ref)
                 if int(diff.max()) < 20:
                     th = np.zeros(gray.shape, np.uint8)      # nothing changed
                 else:
@@ -151,7 +155,7 @@ class Tracker:
         elif self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
             # black-hat isolates dark spots on a bright bg; top-hat the reverse.
-            k = max(9, int(self.tophat_kernel) | 1)
+            k = max(9, int(self.tophat_kernel * scale) | 1)   # kernel scales with detect res
             ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
             op = cv2.MORPH_BLACKHAT if self.invert else cv2.MORPH_TOPHAT
             feat = cv2.morphologyEx(gray, op, ker)
@@ -183,14 +187,15 @@ class Tracker:
             th = cv2.bitwise_and(th, mask)
         return th
 
-    def _detect(self, frame_bgr):
-        th = self._binarize(frame_bgr)
+    def _detect(self, frame_bgr, scale=1.0):
+        th = self._binarize(frame_bgr, scale)
         cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+        min_a, max_a = self.min_area * scale * scale, self.max_area * scale * scale
         pts = []
         for c in cnts:
             a = cv2.contourArea(c)
-            if a < self.min_area or a > self.max_area:
+            if a < min_a or a > max_a:
                 continue
             M = cv2.moments(c)
             if M["m00"] == 0:
@@ -276,7 +281,16 @@ class Tracker:
         if self.trails:
             self._draw_trails(annotated)
 
-        pool = self._assign(self._detect(frame_bgr))
+        # detect on a downscaled copy (fast) while the caller keeps full res for
+        # recording/preview — lets you record hi-res and track fast simultaneously
+        fw = frame_bgr.shape[1]
+        if self.detect_max_w and fw > self.detect_max_w:
+            sc = self.detect_max_w / float(fw)
+            det = cv2.resize(frame_bgr, (0, 0), fx=sc, fy=sc)
+            pts = [(int(x / sc), int(y / sc)) for (x, y) in self._detect(det, sc)]
+        else:
+            pts = self._detect(frame_bgr)
+        pool = self._assign(pts)
         self._prev = pool                       # full pool (incl. tentative) carries age
         # report only CONFIRMED tracks (survived confirm_frames) -> kills phantoms
         confirmed = [t for t in pool if t.get("age", 0) >= self.confirm_frames]
@@ -330,7 +344,7 @@ class Tracker:
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
                 "tophat_kernel": self.tophat_kernel, "max_missed": self.max_missed,
                 "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
-                "clahe": self.clahe,
+                "detect_max_w": self.detect_max_w, "clahe": self.clahe,
                 "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
                 "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,

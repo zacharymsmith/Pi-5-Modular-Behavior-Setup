@@ -68,6 +68,7 @@ class TrackIn(BaseModel):
     max_missed: int | None = None
     confirm_frames: int | None = None
     expected_flies: int | None = None
+    detect_max_w: int | None = None
     clahe: bool | None = None
     bgsub_var: int | None = None
     adaptive_block: int | None = None
@@ -306,6 +307,8 @@ def set_track(t: TrackIn):
         tracker.confirm_frames = t.confirm_frames
     if t.expected_flies is not None:
         tracker.expected_flies = t.expected_flies
+    if t.detect_max_w is not None:
+        tracker.detect_max_w = t.detect_max_w
     if t.clahe is not None:
         tracker.clahe = t.clahe
     if t.trails is not None:
@@ -509,7 +512,7 @@ def _gather_config() -> dict:
                     "min_area": tracker.min_area, "max_area": tracker.max_area,
                     "tophat_kernel": tracker.tophat_kernel, "max_missed": tracker.max_missed,
                     "confirm_frames": tracker.confirm_frames, "expected_flies": tracker.expected_flies,
-                    "clahe": tracker.clahe,
+                    "detect_max_w": tracker.detect_max_w, "clahe": tracker.clahe,
                     "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
                     "adaptive_C": tracker.adaptive_C,
                     "roi": tracker.roi,
@@ -535,8 +538,9 @@ def _apply_config(d: dict):
         loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
     for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
-              "tophat_kernel", "max_missed", "confirm_frames", "expected_flies", "clahe",
-              "bgsub_var", "adaptive_block", "adaptive_C", "trails", "trail_len"):
+              "tophat_kernel", "max_missed", "confirm_frames", "expected_flies",
+              "detect_max_w", "clahe", "bgsub_var", "adaptive_block", "adaptive_C",
+              "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     if "roi" in tk:                      # arena ROI (rebuild mask on load)

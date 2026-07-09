@@ -74,6 +74,11 @@
   .seg button.on{background:var(--accent);color:#fff}
   .seg button:not(.on):hover{background:#222a38;color:var(--fg)}
   .drawhint{font-size:12px;color:var(--muted);margin-top:2px}
+  .recbar{margin-top:10px;padding:9px 13px;border-radius:9px;background:var(--panel2);
+          border:1px solid var(--line);font-size:13px;color:var(--muted)}
+  .recbar.live{background:rgba(229,72,77,.16);border-color:var(--red);color:#ff9a9d;font-weight:700}
+  .recbar.live .dot{animation:blink 1s steps(2,start) infinite}
+  @keyframes blink{to{opacity:.25}}
   .chk{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);cursor:pointer}
   .chk input{width:15px;height:15px;accent-color:var(--accent)}
   .badge{display:inline-block;width:8px;height:8px;border-radius:50%;background:#556;margin-right:6px}
@@ -139,9 +144,9 @@
         <button class="green" onclick="rec(true)">● Record</button>
         <button class="red" onclick="rec(false)">■ Stop</button>
       </div>
+      <div id="recinfo" class="recbar">● not recording</div>
       <label class="switch" style="margin-top:8px"><input type="checkbox" id="recAnno" onchange="setRecOpts()">
         <span class="track"><span class="knob"></span></span> Also save an annotated copy (tracking + overlays)</label>
-      <div class="statline" id="recinfo">not recording</div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="mockEn" onchange="setMock()">
         <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
       <div class="rowbtns"><button class="primary sm" onclick="selfTest()">🧪 Self-test (sim flies)</button>
@@ -332,6 +337,16 @@
         <label style="margin:0">Expected flies (0 = any)</label>
         <input id="expflies" type="number" min="0" max="20" value="0" style="width:70px" onchange="setTrack()">
       </div>
+      <div class="inline" style="gap:8px;margin-top:8px">
+        <label style="margin:0">Track at</label>
+        <select id="detw" onchange="setTrack()" style="width:auto;padding:6px">
+          <option value="0">full resolution</option>
+          <option value="960">960 px (fast)</option>
+          <option value="800">800 px (faster)</option>
+          <option value="640">640 px (fastest)</option>
+        </select>
+        <small class="hint">detect on a small copy → record hi-res + track fast</small>
+      </div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
       <div class="slider" style="margin-top:8px">
@@ -459,7 +474,7 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     auto_threshold:$('autoThr').checked,
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
     max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
-    confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,
+    confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,detect_max_w:+$('detw').value,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
 function captureBG(){$('bgInfo').textContent='capturing…';post('/api/track/capture_bg').then(r=>{
@@ -558,9 +573,15 @@ function setProx(){$('proxDistVal').textContent=$('proxDist').value+' px';
 function clearZones(){post('/api/loop/zones/clear').then(refresh);}
 function removeZone(id){post('/api/loop/zone/remove',{id}).then(refresh);}
 function setTriggerProto(){post('/api/loop/protocol',protoObj()).then(refresh);}
-async function rec(on){const r=await post(on?'/api/record/start':'/api/record/stop');
-  $('recinfo').textContent=on?('recording → '+(r.path||'')):('saved '+(r.path||''));
-  $('recinfo').className='statline'+(on?' on':'');}
+function rec(on){post(on?'/api/record/start':'/api/record/stop');}
+function fmtT(s){s=s||0;const m=Math.floor(s/60),x=s%60;return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
+function updateRecBar(cam){
+  if(cam.recording){
+    $('recinfo').innerHTML=`<span class="dot" style="color:#e5484d">●</span> REC ${fmtT(cam.rec_elapsed)} · ${cam.record_fps||cam.fps} fps · ${(cam.path||'').split('/').pop()}${cam.annotated?' (+annotated)':''}`;
+    $('recinfo').className='recbar live';
+  } else {
+    $('recinfo').textContent='● not recording'; $('recinfo').className='recbar';
+  }}
 function retryCam(){post('/api/camera/retry').then(refresh);}
 function setMock(){post('/api/camera/mock',{enabled:$('mockEn').checked});}
 function selfTest(){post('/api/selftest').then(r=>{
@@ -649,6 +670,7 @@ async function refresh(){
   if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
   if(s.camera.brightness!=null) $('brightVal').textContent=s.camera.brightness;
   if(s.camera.focus!=null) $('focusVal').textContent=s.camera.focus;
+  updateRecBar(s.camera);
   // keep illumination sliders showing the ACTUAL light levels (unless being dragged)
   document.querySelectorAll('#lights input[data-light]').forEach(inp=>{
     if(document.activeElement!==inp){const v=s.lights[inp.dataset.light]; if(v!=null) inp.value=v;}});
@@ -683,6 +705,7 @@ async function refresh(){
     $('maxmiss').value=s.tracker.max_missed;$('maxmissVal').textContent=s.tracker.max_missed;
     $('confirm').value=s.tracker.confirm_frames;$('confirmVal').textContent=s.tracker.confirm_frames;
     $('expflies').value=s.tracker.expected_flies;
+    $('detw').value=s.tracker.detect_max_w;
     $('clahe').checked=s.tracker.clahe;
     $('invert').checked=s.tracker.invert;
     $('trailsEn').checked=s.tracker.trails;
