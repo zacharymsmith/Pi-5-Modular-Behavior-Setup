@@ -19,7 +19,8 @@ import numpy as np
 
 from config import (TRACK_THRESHOLD, TRACK_INVERT, TRACK_MIN_AREA, TRACK_MAX_AREA,
                     TRACK_MAX_BLOBS, TRACK_MATCH_DIST_PX, TRACK_AUTO_THRESHOLD,
-                    TRACK_TOPHAT_KERNEL, TRACK_MAX_MISSED, TRAIL_ENABLED, TRAIL_LENGTH)
+                    TRACK_TOPHAT_KERNEL, TRACK_MAX_MISSED, TRACK_CONFIRM_FRAMES,
+                    TRACK_EXPECTED_FLIES, TRAIL_ENABLED, TRAIL_LENGTH)
 
 _ID_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
               (0, 255, 255), (200, 100, 255), (120, 255, 120), (255, 255, 0)]
@@ -46,6 +47,8 @@ class Tracker:
     max_blobs: int = TRACK_MAX_BLOBS
     match_dist: int = TRACK_MATCH_DIST_PX
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
+    confirm_frames: int = TRACK_CONFIRM_FRAMES # new blob must persist this long to become a track
+    expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
     computed_threshold: int = TRACK_THRESHOLD
@@ -191,10 +194,10 @@ class Tracker:
                 vy = a * (y - best["y"]) + (1 - a) * best.get("vy", 0.0)
                 tracks.append({"id": best["id"], "x": x, "y": y, "vx": vx, "vy": vy,
                                "speed": (vx * vx + vy * vy) ** 0.5,
-                               "missed": 0, "coasting": False})
+                               "missed": 0, "coasting": False, "age": best.get("age", 0) + 1})
             else:
                 tracks.append({"id": self._next_id, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
-                               "speed": 0.0, "missed": 0, "coasting": False})
+                               "speed": 0.0, "missed": 0, "coasting": False, "age": 1})
                 self._next_id += 1
         # coast unmatched previous tracks through the gap (holds identity + trigger)
         for p in prev:
@@ -206,7 +209,7 @@ class Tracker:
             vx, vy = p.get("vx", 0.0) * 0.85, p.get("vy", 0.0) * 0.85
             tracks.append({"id": p["id"], "x": int(round(p["px"])), "y": int(round(p["py"])),
                            "vx": vx, "vy": vy, "speed": (vx * vx + vy * vy) ** 0.5,
-                           "missed": missed, "coasting": True})
+                           "missed": missed, "coasting": True, "age": p.get("age", 0)})
         return tracks
 
     def process(self, frame_bgr):
@@ -223,8 +226,14 @@ class Tracker:
         if self.trails:
             self._draw_trails(annotated)
 
-        tracks = self._assign(self._detect(frame_bgr))
-        self._prev = tracks
+        pool = self._assign(self._detect(frame_bgr))
+        self._prev = pool                       # full pool (incl. tentative) carries age
+        # report only CONFIRMED tracks (survived confirm_frames) -> kills phantoms
+        confirmed = [t for t in pool if t.get("age", 0) >= self.confirm_frames]
+        if self.expected_flies and len(confirmed) > self.expected_flies:
+            confirmed = sorted(confirmed, key=lambda t: t.get("age", 0),
+                               reverse=True)[:self.expected_flies]
+        tracks = confirmed
         self.tracks = tracks
 
         live_ids = {t["id"] for t in tracks}
@@ -272,6 +281,7 @@ class Tracker:
                 "threshold": self.threshold, "computed_threshold": self.computed_threshold,
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
                 "tophat_kernel": self.tophat_kernel, "max_missed": self.max_missed,
+                "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
                 "clahe": self.clahe,
                 "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
                 "adaptive_C": self.adaptive_C,

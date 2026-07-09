@@ -68,6 +68,8 @@ TRACK_MAX_BLOBS = 10           # cap detections per frame
 TRACK_MATCH_DIST_PX = 90       # max px a fly can move between frames to keep its ID
 TRACK_TOPHAT_KERNEL = 25       # px; ~2x fly body length (illumination-invariant method)
 TRACK_MAX_MISSED = 12          # frames to coast a track through a detection gap (keeps ID)
+TRACK_CONFIRM_FRAMES = 4       # a new blob must persist this many frames before it gets an ID
+TRACK_EXPECTED_FLIES = 0       # cap on reported flies (0 = unlimited); e.g. 1 for single-fly assays
 
 # ---------------------------------------------------------------------------
 # Spatial calibration

@@ -73,6 +73,7 @@ class SessionLogger:
         self._ev_f = self._tr_f = None
         self._ev = self._tr = None
         self._meta = {}
+        self._frame0 = None
 
     def set_base_dir(self, path: str | None):
         self.base_dir = os.path.expanduser(path) if path else SESSIONS_DIR
@@ -87,6 +88,7 @@ class SessionLogger:
             os.makedirs(self.dir, exist_ok=True)
             self.t0 = time.time()
             self.n_events = self.n_track_rows = 0
+            self._frame0 = None          # first frame index -> 0-based, aligned to recording
             self._meta = meta or {}
             cfg = {"name": self.name, "started": datetime.now().isoformat(),
                    "git_commit": _git_commit(), **meta}
@@ -124,9 +126,12 @@ class SessionLogger:
             if not self.running:
                 return
             t = round(time.time() - self.t0, 3)
+            if self._frame0 is None:
+                self._frame0 = frame
+            fidx = frame - self._frame0          # 0-based, aligned to recording start
             for tr in tracks:
                 self._tr.writerow({
-                    "t_s": t, "frame": frame, "id": tr["id"],
+                    "t_s": t, "frame": fidx, "id": tr["id"],
                     "x_px": tr["x"], "y_px": tr["y"],
                     "x_mm": round(tr["x"] * mm_per_px, 3) if mm_per_px else "",
                     "y_mm": round(tr["y"] * mm_per_px, 3) if mm_per_px else "",
@@ -170,22 +175,27 @@ class SessionLogger:
     # ---- end-of-session analysis --------------------------------------
     def _summarize(self, d, dur) -> dict:
         setup = (self._meta or {}).get("setup", {})
-        cam = setup.get("camera", {})
-        fps = float(cam.get("fps") or 30) or 30
         mmpp = setup.get("calibration")
 
         # read trajectories
         per = {}
+        frames = set()
         tpath = os.path.join(d, "tracks.csv")
         if os.path.exists(tpath):
             with open(tpath) as f:
                 for row in csv.DictReader(f):
                     i = row["id"]
+                    frames.add(row["frame"])
                     per.setdefault(i, {"pts": [], "sp": []})
                     per[i]["pts"].append((float(row["x_px"]), float(row["y_px"])))
                     per[i]["sp"].append(float(row["speed_px"] or 0))
 
-        flies = {}
+        # actual fps from the data (loop rate) — not the target fps
+        fps = (len(frames) / dur) if dur > 0 and frames else 30.0
+        # a real fly must persist at least ~1 s; shorter = spurious blob
+        min_points = max(int(round(fps)), 5)
+
+        flies, spurious = {}, {}
         for i, dat in per.items():
             pts, sp = dat["pts"], dat["sp"]
             path = sum(((pts[k][0] - pts[k - 1][0]) ** 2 + (pts[k][1] - pts[k - 1][1]) ** 2) ** 0.5
@@ -199,7 +209,10 @@ class SessionLogger:
                 rec["path_mm"] = round(path * mmpp, 1)
                 rec["mean_speed_mm_s"] = round(mean_s * fps * mmpp, 2)
                 rec["max_speed_mm_s"] = round(max_s * fps * mmpp, 2)
-            flies[i] = rec
+            if len(pts) >= min_points:
+                flies[i] = rec
+            else:
+                spurious[i] = {"n_points": len(pts)}
 
         # stimulation summary from events.csv
         stim_counts, dose_totals = {}, {}
@@ -218,10 +231,11 @@ class SessionLogger:
                     except (TypeError, ValueError):
                         pass
 
-        self._draw_trajectory(d, per, cam)
-        return {"duration_s": dur, "n_flies": len(per),
-                "flies": flies, "stim_counts": stim_counts,
-                "dose_mJ_cm2_total": dose_totals,
+        self._draw_trajectory(d, per, setup.get("camera", {}))
+        return {"duration_s": dur, "actual_fps": round(fps, 1),
+                "n_flies": len(flies), "flies": flies,
+                "n_spurious_tracks": len(spurious), "spurious_tracks": spurious,
+                "stim_counts": stim_counts, "dose_mJ_cm2_total": dose_totals,
                 "calibration_mm_per_px": mmpp}
 
     def _draw_trajectory(self, d, per, cam):

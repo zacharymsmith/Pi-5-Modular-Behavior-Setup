@@ -168,6 +168,23 @@
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
         </div>
         <div class="kv"><span>Live scene brightness (0–255)</span><b id="brightVal">—</b></div>
+        <div class="divider"></div>
+        <label class="switch"><input type="checkbox" id="ovEnabled" checked onchange="setOverlay()">
+          <span class="track"><span class="knob"></span></span> Burn info overlay into video</label>
+        <label style="margin-top:8px">Overlay title</label>
+        <input id="ovTitle" placeholder="experiment / video title" onchange="setOverlay()">
+        <div class="inline" style="gap:14px;flex-wrap:wrap;margin-top:8px">
+          <label class="chk"><input type="checkbox" id="ovDate" checked onchange="setOverlay()"> Date/time</label>
+          <label class="chk"><input type="checkbox" id="ovElapsed" checked onchange="setOverlay()"> Rec elapsed</label>
+          <label class="chk"><input type="checkbox" id="ovFrame" checked onchange="setOverlay()"> Frame #</label>
+          <label class="chk"><input type="checkbox" id="ovFps" checked onchange="setOverlay()"> FPS</label>
+        </div>
+        <div class="inline" style="gap:8px;margin-top:8px"><small class="hint">corner</small>
+          <select id="ovCorner" onchange="setOverlay()" style="width:auto;padding:6px">
+            <option value="tl">top-left</option><option value="tr">top-right</option>
+            <option value="bl">bottom-left</option><option value="br">bottom-right</option></select>
+        </div>
+        <small class="hint">Overlay is burned into the video only — tracking markers stay preview-only, so recordings remain clean for analysis.</small>
       </details>
     </section>
 
@@ -296,6 +313,14 @@
         <label>Coast frames</label><input id="maxmiss" type="range" min="0" max="45" value="12" oninput="setTrack()">
         <span class="val" id="maxmissVal">12</span>
       </div>
+      <div class="slider">
+        <label>Confirm frames</label><input id="confirm" type="range" min="1" max="20" value="4" oninput="setTrack()">
+        <span class="val" id="confirmVal">4</span>
+      </div>
+      <div class="inline" style="gap:8px;margin-top:4px">
+        <label style="margin:0">Expected flies (0 = any)</label>
+        <input id="expflies" type="number" min="0" max="20" value="0" style="width:70px" onchange="setTrack()">
+      </div>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
       <div class="slider" style="margin-top:8px">
@@ -416,10 +441,12 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
   $('maxareaVal').textContent=$('maxarea').value;$('trailLenVal').textContent=$('trailLen').value;
   $('thresh').disabled=$('autoThr').checked;
   $('tophatVal').textContent=$('tophat').value;$('maxmissVal').textContent=$('maxmiss').value;
+  $('confirmVal').textContent=$('confirm').value;
   post('/api/track',{enabled:$('trackEn').checked,method:$('method').value,
     auto_threshold:$('autoThr').checked,
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
     max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
+    confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
 let maskShown=false;
@@ -435,6 +462,9 @@ function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('
 function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
   post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
     exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
+function setOverlay(){post('/api/camera/overlay',{enabled:$('ovEnabled').checked,title:$('ovTitle').value,
+  show_datetime:$('ovDate').checked,show_elapsed:$('ovElapsed').checked,show_frame:$('ovFrame').checked,
+  show_fps:$('ovFps').checked,corner:$('ovCorner').value});}
 function autoExpose(){$('expInfo').textContent='metering the arena…';
   post('/api/camera/autoexpose').then(r=>{
     if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
@@ -620,6 +650,8 @@ async function refresh(){
     $('maxarea').value=s.tracker.max_area;$('maxareaVal').textContent=s.tracker.max_area;
     $('tophat').value=s.tracker.tophat_kernel;$('tophatVal').textContent=s.tracker.tophat_kernel;
     $('maxmiss').value=s.tracker.max_missed;$('maxmissVal').textContent=s.tracker.max_missed;
+    $('confirm').value=s.tracker.confirm_frames;$('confirmVal').textContent=s.tracker.confirm_frames;
+    $('expflies').value=s.tracker.expected_flies;
     $('clahe').checked=s.tracker.clahe;
     $('invert').checked=s.tracker.invert;
     $('trailsEn').checked=s.tracker.trails;
@@ -630,6 +662,10 @@ async function refresh(){
     $('camAuto').checked=s.camera.controls.auto_exposure;
     $('camExp').value=s.camera.controls.exposure_us;
     $('camGain').value=s.camera.controls.gain;
+    const ov=s.camera.overlay||{};
+    $('ovEnabled').checked=ov.enabled;$('ovTitle').value=ov.title||'';
+    $('ovDate').checked=ov.show_datetime;$('ovElapsed').checked=ov.show_elapsed;
+    $('ovFrame').checked=ov.show_frame;$('ovFps').checked=ov.show_fps;$('ovCorner').value=ov.corner||'tl';
     $('mmpp').value=s.loop.mm_per_px||'';
     camAutoToggle();phActToggle();
     fit();built=true;

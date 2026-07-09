@@ -48,6 +48,13 @@ class Camera:
         self.force_mock = False
         self.frame_cb = None
         self._brightness = 0.0
+        self._record_fps = 0.0
+        self._rec_frame = 0
+        self._rec_t0 = 0.0
+        # configurable info overlay burned into the video (NOT the tracking markers)
+        self.overlay = {"enabled": True, "title": "", "show_datetime": True,
+                        "show_elapsed": True, "show_frame": True, "show_fps": True,
+                        "corner": "tl"}
         os.makedirs(RECORDING_DIR, exist_ok=True)
 
         self._open()
@@ -156,9 +163,16 @@ class Camera:
                         annotated = self.frame_cb(frame)
                     except Exception:
                         annotated = frame
+                ov = self.overlay.get("enabled")
                 if self.recording and self._writer is not None:
-                    self._writer.write(frame)
-                preview = cv2.resize(annotated, PREVIEW_SIZE)
+                    self._rec_frame += 1
+                    # recorded = raw frame + info overlay only (no tracking markers)
+                    rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame
+                    self._writer.write(rec)
+                disp = annotated
+                if ov:
+                    disp = self._draw_overlay(annotated.copy(), recording=self.recording)
+                preview = cv2.resize(disp, PREVIEW_SIZE)
                 self._brightness = float(preview.mean())   # live scene brightness 0..255
                 ok, buf = cv2.imencode(".jpg", preview,
                                        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
@@ -176,6 +190,48 @@ class Camera:
                     time.sleep(1.0 / max(self.fps, 1))
             except Exception:
                 time.sleep(0.05)
+
+    def set_overlay(self, **kw):
+        for k, v in kw.items():
+            if v is not None and k in self.overlay:
+                self.overlay[k] = v
+        return self.overlay
+
+    def _draw_overlay(self, img, recording=False):
+        o = self.overlay
+        lines = []
+        if o.get("title"):
+            lines.append(str(o["title"]))
+        if o.get("show_datetime"):
+            lines.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        if o.get("show_elapsed") and recording:
+            el = time.time() - self._rec_t0
+            lines.append(f"REC {int(el // 60):02d}:{int(el % 60):02d}")
+        if o.get("show_frame") and recording:
+            lines.append(f"frame {self._rec_frame}")
+        if o.get("show_fps"):
+            lines.append(f"{self._fps_est:.1f} fps")
+        if not lines:
+            return img
+        h, w = img.shape[:2]
+        scale = max(0.4, w / 1600.0)
+        font, thick = cv2.FONT_HERSHEY_SIMPLEX, 1
+        sizes = [cv2.getTextSize(t, font, scale, thick)[0] for t in lines]
+        lineh = int(max(s[1] for s in sizes) * 1.9)
+        boxw = max(s[0] for s in sizes) + 14
+        boxh = lineh * len(lines) + 8
+        corner = o.get("corner", "tl")
+        x0 = 6 if "l" in corner else max(0, w - boxw - 6)
+        y0 = 6 if "t" in corner else max(0, h - boxh - 6)
+        sub = img[y0:y0 + boxh, x0:x0 + boxw]
+        if sub.size:
+            dark = np.zeros_like(sub)
+            cv2.addWeighted(dark, 0.45, sub, 0.55, 0, sub)
+        y = y0 + lineh - 4
+        for t in lines:
+            cv2.putText(img, t, (x0 + 7, y), font, scale, (60, 255, 140), thick, cv2.LINE_AA)
+            y += lineh
+        return img
 
     def _mock_frame(self):
         w, h = self.size
@@ -264,10 +320,16 @@ class Camera:
         os.makedirs(d, exist_ok=True)
         self.record_path = os.path.join(d, name)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self._writer = cv2.VideoWriter(self.record_path, fourcc, self.fps, tuple(self.size))
+        # Record at the ACTUAL processing rate, not the target fps — otherwise the
+        # file plays back too fast (the loop runs slower than the camera fps).
+        rec_fps = round(self._fps_est, 1) if self._fps_est > 1 else self.fps
+        self._record_fps = rec_fps
+        self._writer = cv2.VideoWriter(self.record_path, fourcc, rec_fps, tuple(self.size))
         if not self._writer.isOpened():
             self._writer = None
             return "Could not open the video writer (codec missing?)."
+        self._rec_frame = 0
+        self._rec_t0 = time.time()
         self.recording = True
         return None
 
@@ -293,6 +355,7 @@ class Camera:
             "target_fps": self.fps,
             "controls": dict(self.controls),
             "brightness": round(self._brightness, 1),
+            "overlay": dict(self.overlay),
         }
 
 

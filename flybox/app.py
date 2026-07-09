@@ -65,6 +65,8 @@ class TrackIn(BaseModel):
     max_area: int | None = None
     tophat_kernel: int | None = None
     max_missed: int | None = None
+    confirm_frames: int | None = None
+    expected_flies: int | None = None
     clahe: bool | None = None
     bgsub_var: int | None = None
     adaptive_block: int | None = None
@@ -299,6 +301,10 @@ def set_track(t: TrackIn):
         tracker.tophat_kernel = t.tophat_kernel
     if t.max_missed is not None:
         tracker.max_missed = t.max_missed
+    if t.confirm_frames is not None:
+        tracker.confirm_frames = t.confirm_frames
+    if t.expected_flies is not None:
+        tracker.expected_flies = t.expected_flies
     if t.clahe is not None:
         tracker.clahe = t.clahe
     if t.trails is not None:
@@ -409,6 +415,21 @@ def camera_mock(m: MockIn):
     return {"ok": True, "mock": camera.set_mock(m.enabled)}
 
 
+class OverlayIn(BaseModel):
+    enabled: bool | None = None
+    title: str | None = None
+    show_datetime: bool | None = None
+    show_elapsed: bool | None = None
+    show_frame: bool | None = None
+    show_fps: bool | None = None
+    corner: str | None = None
+
+
+@app.post("/api/camera/overlay")
+def camera_overlay(o: OverlayIn):
+    return {"ok": True, "overlay": camera.set_overlay(**o.dict())}
+
+
 @app.post("/api/camera/autoexpose")
 def camera_autoexpose():
     """Auto-set exposure/gain to hit a good brightness INSIDE the arena ROI, then
@@ -442,13 +463,14 @@ def _gather_config() -> dict:
                     "invert": tracker.invert, "auto_threshold": tracker.auto_threshold,
                     "min_area": tracker.min_area, "max_area": tracker.max_area,
                     "tophat_kernel": tracker.tophat_kernel, "max_missed": tracker.max_missed,
+                    "confirm_frames": tracker.confirm_frames, "expected_flies": tracker.expected_flies,
                     "clahe": tracker.clahe,
                     "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
                     "adaptive_C": tracker.adaptive_C,
                     "roi": tracker.roi,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
         "camera": {"width": s["size"][0], "height": s["size"][1],
-                   "fps": s["target_fps"], **s["controls"]},
+                   "fps": s["target_fps"], "overlay": s["overlay"], **s["controls"]},
     }
 
 
@@ -468,8 +490,8 @@ def _apply_config(d: dict):
         loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
     for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
-              "tophat_kernel", "max_missed", "clahe", "bgsub_var", "adaptive_block",
-              "adaptive_C", "trails", "trail_len"):
+              "tophat_kernel", "max_missed", "confirm_frames", "expected_flies", "clahe",
+              "bgsub_var", "adaptive_block", "adaptive_C", "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     if "roi" in tk:                      # arena ROI (rebuild mask on load)
@@ -480,6 +502,8 @@ def _apply_config(d: dict):
             tracker.clear_arena()
     cam = d.get("camera", {})
     if cam:
+        if cam.get("overlay"):
+            camera.set_overlay(**cam["overlay"])
         camera.apply_config(
             size=(cam.get("width"), cam.get("height"))
             if cam.get("width") and cam.get("height") else None,
