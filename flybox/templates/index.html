@@ -25,8 +25,9 @@
   .zoomctl span{font-size:12px;color:var(--muted);min-width:40px;text-align:center}
   main{display:grid;grid-template-columns:minmax(420px,1.1fr) 1fr;gap:18px;padding:18px;max-width:1500px;margin:0 auto}
   @media(max-width:1000px){main{grid-template-columns:1fr}}
-  body.wide main{grid-template-columns:1fr;max-width:1300px}
-  body.wide .previewWrap{max-width:100%}
+  body.wide main{grid-template-columns:1fr;max-width:1400px}
+  .previewWrap:fullscreen{width:100vw;height:100vh;aspect-ratio:auto;border-radius:0;background:#000}
+  .previewWrap:-webkit-full-screen{width:100vw;height:100vh;aspect-ratio:auto;background:#000}
   .col{display:flex;flex-direction:column;gap:18px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
   .card h2{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
@@ -116,7 +117,7 @@
     <section class="card">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <h2>Camera</h2>
-        <button class="ghost sm" onclick="toggleWide()">⤢ Enlarge</button>
+        <button class="ghost sm" onclick="toggleWide()">⤢ Fullscreen video</button>
       </div>
       <p class="sub">Use the Draw tools below to set the arena and trigger zones.</p>
       <div class="previewWrap">
@@ -130,7 +131,6 @@
             <button type="button" data-v="arena" class="on">Arena</button>
             <button type="button" data-v="red">Red zone</button>
             <button type="button" data-v="blue">Blue zone</button>
-            <button type="button" data-v="bgpatch">BG patch</button>
           </div>
         </div>
         <div class="drawrow">
@@ -306,12 +306,12 @@
 
     <section class="card">
       <h2>Tracking</h2>
-      <label class="switch"><input type="checkbox" id="trackEn" onchange="setTrack()">
+      <label class="switch"><input type="checkbox" id="trackEn" onchange="setTrack();maybeAutoBuildRef()">
         <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
       <div class="rowbtns"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
         <small class="hint" id="tuneInfo"></small></div>
       <label style="margin-top:10px">Detection method</label>
-      <select id="method" onchange="setTrack();updateMethodUI()" style="width:100%">
+      <select id="method" onchange="setTrack();updateMethodUI();maybeAutoBuildRef()" style="width:100%">
         <option value="refsub">Reference subtraction (recommended)</option>
         <option value="tophat">Illumination-invariant</option>
         <option value="threshold">Threshold (Otsu / manual)</option>
@@ -319,11 +319,9 @@
 
       <div id="grpRefsub">
         <div class="rowbtns" style="margin-top:8px">
-          <button class="primary sm" onclick="buildBG()">🌗 Build background</button>
-          <button class="ghost sm" onclick="captureBG()">📸 Snapshot (empty)</button>
-          <button class="ghost sm" onclick="resetBG()">Reset</button>
+          <button class="primary sm" onclick="buildBG()">🌗 Rebuild reference</button>
         </div>
-        <small class="hint" id="bgInfo">Draw the arena tight to the dish, then Build (median over ~3 s — flies may be present, let them move). Validated best method on your footage.</small>
+        <small class="hint" id="bgInfo">The reference builds automatically when you enable tracking. Rebuild it only if you change the lighting, exposure, or arena. Draw the arena tight to the dish for the cleanest results.</small>
       </div>
 
       <div id="grpTophat" class="slider" style="margin-top:8px">
@@ -502,14 +500,15 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,detect_max_w:+$('detw').value,
     assignment:$('assign').value,fit_ellipse:$('fitEll').checked,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
-function resetBG(){post('/api/track/reset_bg');}
-function captureBG(){$('bgInfo').textContent='capturing…';post('/api/track/capture_bg').then(r=>{
-  $('bgInfo').textContent=r.ok?'snapshot captured ✓ — method switched to Reference subtraction':(r.error||'failed');
-  built=false;refresh();});}
-function buildBG(){$('bgInfo').textContent='building median background (~3 s, let flies move)…';
-  post('/api/track/build_bg',{seconds:3}).then(r=>{
-    $('bgInfo').textContent=r.ok?`background built from ${r.n_frames} frames ✓ — method switched to Reference subtraction`:(r.error||'failed');
+let hasRef=false, building=false;
+function buildBG(){if(building)return;building=true;
+  $('bgInfo').textContent='building reference (~3 s — let the flies move around)…';
+  post('/api/track/build_bg',{seconds:3}).then(r=>{building=false;
+    if(r.ok){hasRef=true;$('bgInfo').textContent=`reference built from ${r.n_frames} frames ✓`;}
+    else{$('bgInfo').textContent=r.error||'failed';}
     built=false;refresh();});}
+// auto-build the reference the moment tracking is enabled with refsub (no manual step)
+function maybeAutoBuildRef(){if($('trackEn').checked&&$('method').value==='refsub'&&!hasRef&&!building)buildBG();}
 let maskShown=false;
 function toggleMask(){maskShown=!maskShown;$('maskimg').style.display=maskShown?'block':'none';
   $('maskBtn').textContent=maskShown?'Hide detection mask':'Show detection mask';}
@@ -541,9 +540,14 @@ async function refreshPresets(){const r=await fetch('/api/presets').then(x=>x.js
   const sel=$('presetSel'),cur=sel.value;
   sel.innerHTML=(r.presets.length?r.presets:['']).map(p=>`<option value="${p}">${p||'(none saved)'}</option>`).join('');
   if(cur)sel.value=cur;}
-function savePreset(){const n=$('presetName').value.trim();if(!n){alert('Name the preset first');return;}
+function tstamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;}
+function presetNames(){return [...$('presetSel').options].map(o=>o.value).filter(Boolean);}
+function savePreset(){let n=$('presetName').value.trim();
   const secs=[...document.querySelectorAll('.psec:checked')].map(c=>c.value);
   if(!secs.length){alert('Tick at least one section to save');return;}
+  if(!n)n='preset_'+tstamp();                              // auto-name with date/time if blank
+  if(presetNames().includes(n)&&!confirm(`A preset named "${n}" already exists.\nOverwrite it?`))return;
   post('/api/presets/save',{name:n,sections:secs}).then(()=>{$('presetName').value='';refreshPresets();});}
 function loadPreset(){const n=$('presetSel').value;if(!n)return;
   post('/api/presets/load',{name:n}).then(()=>{built=false;refresh();});}
@@ -560,8 +564,11 @@ function setCalib(){const v=parseFloat($('mmpp').value);
 function resetHeat(){post('/api/analytics/reset');}
 
 // sessions
-function sessionStart(){post('/api/session/start',{name:$('sessName').value||'session',
-  save_dir:$('sessDirIn').value||null,experimenter:$('sessExp').value||null,
+function sessionStart(){let name=$('sessName').value.trim();
+  if(!name){  // auto-name from metadata + timestamp so nothing is ever unlabelled
+    const parts=[$('sessExp').value.trim(),$('sessGeno').value.trim()].filter(Boolean);
+    name=(parts.join('_')||'session')+'_'+tstamp();}
+  post('/api/session/start',{name,save_dir:$('sessDirIn').value||null,experimenter:$('sessExp').value||null,
   genotype:$('sessGeno').value||null,notes:$('sessNotes').value||null}).then(r=>{
     if(!r.ok){alert(r.error);return;}
     if($('sessArm').checked){$('loopEn').checked=true;setLoop();}});}
@@ -624,11 +631,10 @@ function initSeg(id,cb){const seg=$(id);seg.querySelectorAll('button').forEach(b
 initSeg('segTarget',v=>{drawTarget=v;updateHint();});
 initSeg('segShape',v=>{drawShape=v;updateHint();});
 function updateHint(){
-  if(drawTarget==='bgpatch'){$('drawHint').textContent='BG patch — drag a box over a fly-free spot to grab it into the background.';return;}
   const t=drawTarget==='arena'?'arena mask':drawTarget+' zone';
   const how=drawShape==='ellipse'?'click the centre, drag outward to the edge':'drag a box corner-to-corner';
   $('drawHint').textContent=`${t} — ${how}.`;}
-function drawColor(){return drawTarget==='arena'?'#ffff00':drawTarget==='bgpatch'?'#00e5ff':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
+function drawColor(){return drawTarget==='arena'?'#ffff00':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
 
 const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
 function fit(){const r=$('preview').getBoundingClientRect();cv.width=Math.round(r.width);cv.height=Math.round(r.height);}
@@ -649,11 +655,15 @@ cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2
   drag=null;setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
   const nx1=x1/cv.width,ny1=y1/cv.height,nx2=x2/cv.width,ny2=y2/cv.height;
   if(Math.abs(nx2-nx1)<0.02||Math.abs(ny2-ny1)<0.02)return;
-  if(drawTarget==='bgpatch') post('/api/track/patch_bg',{nx1,ny1,nx2,ny2}).then(()=>{$('bgInfo').textContent='background patched ✓';});
-  else if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
+  if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
   else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
 function clearArena(){post('/api/track/roi/clear').then(refresh);}
-function toggleWide(){document.body.classList.toggle('wide');setTimeout(fit,80);}
+function toggleWide(){const pw=document.querySelector('.previewWrap');
+  const fs=document.fullscreenElement||document.webkitFullscreenElement;
+  if(!fs){ (pw.requestFullscreen||pw.webkitRequestFullscreen).call(pw); }
+  else { (document.exitFullscreen||document.webkitExitFullscreen).call(document); }}
+document.addEventListener('fullscreenchange',()=>setTimeout(fit,120));
+document.addEventListener('webkitfullscreenchange',()=>setTimeout(fit,120));
 function updateMethodUI(){const m=$('method').value;
   $('grpRefsub').style.display=(m==='refsub')?'':'none';
   $('grpTophat').style.display=(m==='tophat')?'':'none';
@@ -680,6 +690,7 @@ async function refresh(){
   $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
   $('optoStat').className='statline'+(s.opto.running?' on':'');
   $('trackCount').textContent=s.tracker.count;
+  hasRef=!!s.tracker.has_reference;
   $('loopFires').textContent=s.loop.fires;
   $('loopLast').textContent=s.loop.last_event;
   $('protoRed').textContent=proto1(s.loop.protocols.red);

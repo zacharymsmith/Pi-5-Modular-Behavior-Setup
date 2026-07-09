@@ -77,6 +77,10 @@ _ID_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
               (0, 255, 255), (200, 100, 255), (120, 255, 120), (255, 255, 0)]
 _KERNEL = np.ones((3, 3), np.uint8)
 _KERNEL5 = np.ones((5, 5), np.uint8)
+# Default arena mask: a centred ellipse inset from the edges, so the bright dish
+# rim + corners (the #1 source of phantom blobs) are never searched even before
+# the user draws a tight arena. Empirically drops corner detections to ~0%.
+DEFAULT_ROI = {"shape": "ellipse", "x1": 0.08, "y1": 0.08, "x2": 0.92, "y2": 0.92}
 
 
 @dataclass
@@ -90,11 +94,7 @@ class Tracker:
     clahe: bool = False          # local contrast enhancement (helps faint flies)
     _clahe: object = None
     tophat_kernel: int = TRACK_TOPHAT_KERNEL   # feature size for illumination-invariant method
-    bgsub_var: int = 25          # MOG2 sensitivity (lower = more sensitive)
-    adaptive_block: int = 51     # adaptive-threshold neighborhood (odd)
-    adaptive_C: int = 5          # adaptive-threshold offset
-    _bgsub: object = None
-    _ref: object = None          # captured empty-arena reference (for refsub method)
+    _ref: object = None          # median reference image (for refsub method)
     min_area: int = TRACK_MIN_AREA
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
@@ -109,7 +109,8 @@ class Tracker:
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
     computed_threshold: int = TRACK_THRESHOLD
-    roi: object = None          # {"cx","cy","rx","ry"} normalized ellipse, or None
+    roi: object = field(default_factory=lambda: dict(DEFAULT_ROI))  # arena mask; defaults to a
+                                # centred ellipse so bright corners are never searched
     tracks: List[Dict] = field(default_factory=list)
     _prev: List[Dict] = field(default_factory=list)
     _next_id: int = 1
@@ -125,7 +126,7 @@ class Tracker:
         self._mask = None
 
     def clear_arena(self):
-        self.roi = None
+        self.roi = dict(DEFAULT_ROI)   # revert to the default centred ellipse (never the corners)
         self._mask = None
 
     def _roi_px(self, w, h):
@@ -148,16 +149,6 @@ class Tracker:
         return m
 
     # ---- segmentation --------------------------------------------------
-    def reset_bg(self):
-        """Re-learn the background model (for the background-subtraction method)."""
-        self._bgsub = None
-
-    def capture_background(self, frame_bgr):
-        """Snapshot the current frame as the reference (use with an empty arena)."""
-        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
-        self._ref = gray
-        return {"ok": True, "shape": list(gray.shape)}
-
     def build_background(self, frames_bgr):
         """Per-pixel MEDIAN of several frames -> a fly-free reference even when
         flies are present (they move, so the median at each pixel is the arena).
@@ -169,20 +160,8 @@ class Tracker:
         self._ref = cv2.GaussianBlur(med, (5, 5), 0)
         return {"ok": True, "n_frames": len(grays)}
 
-    def patch_background(self, frame_bgr, nx1, ny1, nx2, ny2):
-        """Copy the CURRENT frame's pixels in a drawn box into the reference —
-        drag over any spot with no fly to fix/refine the background there."""
-        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
-        if self._ref is None or self._ref.shape != gray.shape:
-            self._ref = gray.copy()
-        h, w = gray.shape
-        x1, x2 = sorted((int(nx1 * w), int(nx2 * w)))
-        y1, y2 = sorted((int(ny1 * h), int(ny2 * h)))
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w, x2), min(h, y2)
-        if x2 > x1 and y2 > y1:
-            self._ref[y1:y2, x1:x2] = gray[y1:y2, x1:x2]
-        return {"ok": True}
+    def has_reference(self) -> bool:
+        return self._ref is not None
 
     def _binarize(self, frame_bgr, scale=1.0):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
@@ -226,19 +205,6 @@ class Tracker:
             feat = cv2.morphologyEx(gray, op, ker)
             _, th = cv2.threshold(feat, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
             self.computed_threshold = 0
-        elif self.method == "bgsub":
-            # moving foreground vs learned static background — ignores fixed
-            # rim shadows/reflections, which is ideal for cluttered arenas.
-            if self._bgsub is None:
-                self._bgsub = cv2.createBackgroundSubtractorMOG2(
-                    history=200, varThreshold=int(self.bgsub_var), detectShadows=False)
-            fg = self._bgsub.apply(gray)
-            _, th = cv2.threshold(fg, 127, 255, cv2.THRESH_BINARY)
-        elif self.method == "adaptive":
-            # local threshold — robust to uneven illumination (bright centre / dark edge).
-            blk = int(self.adaptive_block) | 1        # force odd
-            th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                       mode, max(3, blk), int(self.adaptive_C))
         else:  # threshold (Otsu or manual)
             if self.auto_threshold:
                 val, th = cv2.threshold(gray, 0, 255, mode | cv2.THRESH_OTSU)
@@ -467,8 +433,7 @@ class Tracker:
                 "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
                 "detect_max_w": self.detect_max_w, "assignment": self.assignment,
                 "fit_ellipse": self.fit_ellipse, "solidity": self.solidity, "clahe": self.clahe,
-                "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
-                "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,
                 "roi": self.roi, "has_roi": self.roi is not None,
+                "has_reference": self.has_reference(),
                 "count": len(self.tracks)}

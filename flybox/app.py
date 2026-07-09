@@ -72,9 +72,6 @@ class TrackIn(BaseModel):
     assignment: str | None = None
     fit_ellipse: bool | None = None
     clahe: bool | None = None
-    bgsub_var: int | None = None
-    adaptive_block: int | None = None
-    adaptive_C: int | None = None
     trails: bool | None = None
     trail_len: int | None = None
 
@@ -284,13 +281,6 @@ def set_track(t: TrackIn):
         tracker.enabled = t.enabled
     if t.method is not None:
         tracker.method = t.method
-    if t.bgsub_var is not None:
-        tracker.bgsub_var = t.bgsub_var
-        tracker.reset_bg()
-    if t.adaptive_block is not None:
-        tracker.adaptive_block = t.adaptive_block
-    if t.adaptive_C is not None:
-        tracker.adaptive_C = t.adaptive_C
     if t.auto_threshold is not None:
         tracker.auto_threshold = t.auto_threshold
     if t.threshold is not None:
@@ -355,23 +345,6 @@ def clear_arena():
     return {"ok": True}
 
 
-@app.post("/api/track/reset_bg")
-def reset_bg():
-    tracker.reset_bg()
-    return {"ok": True}
-
-
-@app.post("/api/track/capture_bg")
-def capture_bg():
-    frame = camera.latest_frame()
-    if frame is None:
-        return {"ok": False, "error": "no camera frame yet"}
-    res = tracker.capture_background(frame)
-    if res.get("ok"):
-        tracker.method = "refsub"          # auto-switch so the reference is used
-    return res
-
-
 class BuildBgIn(BaseModel):
     seconds: float = 3.0
 
@@ -379,7 +352,8 @@ class BuildBgIn(BaseModel):
 @app.post("/api/track/build_bg")
 def build_bg(b: BuildBgIn):
     """Median background from frames sampled over a few seconds — works with flies
-    present as long as they move a little."""
+    present as long as they move a little. This is the reference the recommended
+    'reference subtraction' method subtracts each frame against."""
     n = max(6, int(b.seconds * 8))
     frames = []
     for _ in range(n):
@@ -391,14 +365,6 @@ def build_bg(b: BuildBgIn):
     if res.get("ok"):
         tracker.method = "refsub"          # auto-switch so the reference is used
     return res
-
-
-@app.post("/api/track/patch_bg")
-def patch_bg(a: ArenaIn):
-    frame = camera.latest_frame()
-    if frame is None:
-        return {"ok": False, "error": "no camera frame yet"}
-    return tracker.patch_background(frame, a.nx1, a.ny1, a.nx2, a.ny2)
 
 
 @app.get("/api/track/mask.jpg")
@@ -526,8 +492,7 @@ def _gather_config() -> dict:
                     "confirm_frames": tracker.confirm_frames, "expected_flies": tracker.expected_flies,
                     "detect_max_w": tracker.detect_max_w, "assignment": tracker.assignment,
                     "fit_ellipse": tracker.fit_ellipse, "clahe": tracker.clahe,
-                    "bgsub_var": tracker.bgsub_var, "adaptive_block": tracker.adaptive_block,
-                    "adaptive_C": tracker.adaptive_C,
+                    "solidity": tracker.solidity,
                     "roi": tracker.roi,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
         "camera": {"width": s["size"][0], "height": s["size"][1],
@@ -552,8 +517,8 @@ def _apply_config(d: dict):
     tk = d.get("tracker", {})
     for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
               "tophat_kernel", "max_missed", "confirm_frames", "expected_flies",
-              "detect_max_w", "assignment", "fit_ellipse", "clahe", "bgsub_var",
-              "adaptive_block", "adaptive_C", "trails", "trail_len"):
+              "detect_max_w", "assignment", "fit_ellipse", "clahe", "solidity",
+              "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     if "roi" in tk:                      # arena ROI (rebuild mask on load)
