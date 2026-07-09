@@ -186,7 +186,8 @@ class Camera:
                 pg = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
                 ph, pw = pg.shape
                 self._focus = float(cv2.Laplacian(
-                    pg[ph // 3:2 * ph // 3, pw // 3:2 * pw // 3], cv2.CV_64F).var())
+                    pg[int(ph * .15):int(ph * .85), int(pw * .15):int(pw * .85)],
+                    cv2.CV_64F).var())
                 ok, buf = cv2.imencode(".jpg", preview,
                                        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                 if ok:

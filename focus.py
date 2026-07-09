@@ -40,7 +40,8 @@ def _draw(request):
         ch = a.shape[2] if a.ndim == 3 else 1
         gray = cv2.cvtColor(a, cv2.COLOR_BGRA2GRAY if ch == 4 else cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
-        c = gray[h // 3:2 * h // 3, w // 3:2 * w // 3]
+        y1, y2, x1, x2 = int(h * .15), int(h * .85), int(w * .15), int(w * .85)
+        c = gray[y1:y2, x1:x2]                       # wide centre region (needs texture)
         s = float(cv2.Laplacian(c, cv2.CV_64F).var())
         if s > _state["peak"] or (time.time() - _state["pt"]) > 5:
             _state["peak"], _state["pt"] = max(s, 1.0), time.time()
@@ -52,7 +53,7 @@ def _draw(request):
         cv2.rectangle(a, (20, 20), (w - 20, 54), white, 2)
         cv2.putText(a, f"FOCUS {s:8.0f}   peak {_state['peak']:8.0f}", (24, 102),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.1, col, 2, cv2.LINE_AA)
-        cv2.rectangle(a, (w // 3, h // 3), (2 * w // 3, 2 * h // 3), cyan, 1)
+        cv2.rectangle(a, (x1, y1), (x2, y2), cyan, 1)
 
 
 picam2.pre_callback = _draw
