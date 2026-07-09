@@ -51,6 +51,7 @@ class Camera:
         self.force_mock = False
         self.frame_cb = None
         self._brightness = 0.0
+        self._focus = 0.0
         self._record_fps = 0.0
         self._rec_frame = 0
         self._rec_t0 = 0.0
@@ -181,6 +182,11 @@ class Camera:
                             self._writer2.write(disp)   # annotated version (all overlays)
                 preview = cv2.resize(disp, PREVIEW_SIZE)
                 self._brightness = float(preview.mean())   # live scene brightness 0..255
+                # cheap focus score (sharpness) on the preview centre — higher = sharper
+                pg = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
+                ph, pw = pg.shape
+                self._focus = float(cv2.Laplacian(
+                    pg[ph // 3:2 * ph // 3, pw // 3:2 * pw // 3], cv2.CV_64F).var())
                 ok, buf = cv2.imencode(".jpg", preview,
                                        [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                 if ok:
@@ -371,6 +377,7 @@ class Camera:
             "target_fps": self.fps,
             "controls": dict(self.controls),
             "brightness": round(self._brightness, 1),
+            "focus": round(self._focus, 0),
             "overlay": dict(self.overlay),
             "record_annotated": self.record_annotated,
         }

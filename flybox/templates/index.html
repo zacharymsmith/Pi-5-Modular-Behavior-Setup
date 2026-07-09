@@ -172,6 +172,7 @@
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
         </div>
         <div class="kv"><span>Live scene brightness (0–255)</span><b id="brightVal">—</b></div>
+        <div class="kv"><span>Focus score (turn lens to maximize)</span><b id="focusVal">—</b></div>
         <div class="divider"></div>
         <label class="switch"><input type="checkbox" id="ovEnabled" checked onchange="setOverlay()">
           <span class="track"><span class="knob"></span></span> Burn info overlay into video</label>
@@ -647,6 +648,7 @@ async function refresh(){
   $('schedStat').className='statline'+(sc.running?' on':'');
   if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
   if(s.camera.brightness!=null) $('brightVal').textContent=s.camera.brightness;
+  if(s.camera.focus!=null) $('focusVal').textContent=s.camera.focus;
   // keep illumination sliders showing the ACTUAL light levels (unless being dragged)
   document.querySelectorAll('#lights input[data-light]').forEach(inp=>{
     if(document.activeElement!==inp){const v=s.lights[inp.dataset.light]; if(v!=null) inp.value=v;}});
