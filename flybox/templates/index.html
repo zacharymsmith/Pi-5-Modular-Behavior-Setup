@@ -300,13 +300,16 @@
       <label style="margin-top:10px">Detection method (compare per arena)</label>
       <div class="inline" style="gap:8px">
         <select id="method" onchange="setTrack()" style="flex:1">
-          <option value="tophat">Illumination-invariant (recommended)</option>
+          <option value="refsub">Reference subtraction (best for static arena)</option>
+          <option value="tophat">Illumination-invariant</option>
           <option value="threshold">Threshold (Otsu / manual)</option>
           <option value="bgsub">Background subtraction (moving flies)</option>
           <option value="adaptive">Adaptive (uneven lighting)</option>
         </select>
         <button class="ghost sm" onclick="resetBG()">Reset BG</button>
       </div>
+      <div class="rowbtns"><button class="primary sm" onclick="captureBG()">📸 Capture background (empty arena)</button>
+        <small class="hint" id="bgInfo">for Reference subtraction — remove flies, then click</small></div>
       <div class="slider" style="margin-top:8px">
         <label>Feature size</label><input id="tophat" type="range" min="9" max="81" step="2" value="25" oninput="setTrack()">
         <span class="val" id="tophatVal">25</span>
@@ -451,6 +454,8 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
+function captureBG(){$('bgInfo').textContent='capturing…';post('/api/track/capture_bg').then(r=>{
+  $('bgInfo').textContent=r.ok?'background captured ✓ — switch method to Reference subtraction':(r.error||'failed');});}
 let maskShown=false;
 function toggleMask(){maskShown=!maskShown;$('maskimg').style.display=maskShown?'block':'none';
   $('maskBtn').textContent=maskShown?'Hide detection mask':'Show detection mask';}

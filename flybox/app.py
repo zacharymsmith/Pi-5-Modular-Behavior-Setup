@@ -351,6 +351,14 @@ def reset_bg():
     return {"ok": True}
 
 
+@app.post("/api/track/capture_bg")
+def capture_bg():
+    frame = camera.latest_frame()
+    if frame is None:
+        return {"ok": False, "error": "no camera frame yet"}
+    return tracker.capture_background(frame)
+
+
 @app.get("/api/track/mask.jpg")
 def track_mask():
     frame = camera.latest_frame()

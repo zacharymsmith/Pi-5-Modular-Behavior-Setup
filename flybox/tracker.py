@@ -42,6 +42,7 @@ class Tracker:
     adaptive_block: int = 51     # adaptive-threshold neighborhood (odd)
     adaptive_C: int = 5          # adaptive-threshold offset
     _bgsub: object = None
+    _ref: object = None          # captured empty-arena reference (for refsub method)
     min_area: int = TRACK_MIN_AREA
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
@@ -95,6 +96,12 @@ class Tracker:
         """Re-learn the background model (for the background-subtraction method)."""
         self._bgsub = None
 
+    def capture_background(self, frame_bgr):
+        """Snapshot the current frame as the empty-arena reference for 'refsub'."""
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        self._ref = gray
+        return {"ok": True, "shape": list(gray.shape)}
+
     def _binarize(self, frame_bgr):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         if self.blur:
@@ -104,7 +111,18 @@ class Tracker:
                 self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             gray = self._clahe.apply(gray)
         mode = cv2.THRESH_BINARY_INV if self.invert else cv2.THRESH_BINARY
-        if self.method == "tophat":
+        if self.method == "refsub":
+            # difference from a captured empty-arena reference — colour/lighting
+            # proof, keeps stationary flies. Capture the background first.
+            if self._ref is None or self._ref.shape != gray.shape:
+                th = np.zeros(gray.shape, np.uint8)
+            else:
+                diff = cv2.absdiff(gray, self._ref)
+                if int(diff.max()) < 20:
+                    th = np.zeros(gray.shape, np.uint8)      # nothing changed
+                else:
+                    _, th = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        elif self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
             # black-hat isolates dark spots on a bright bg; top-hat the reverse.
             k = max(9, int(self.tophat_kernel) | 1)
@@ -158,19 +176,25 @@ class Tracker:
 
     # ---- auto-tune from a live frame -----------------------------------
     def auto_tune(self, frame_bgr):
-        """Pick polarity + threshold from the current frame (within the arena ROI
-        if one is set). The smaller pixel class after an Otsu split is the flies."""
-        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
-        mask = self._get_mask(gray.shape[1], gray.shape[0])
-        vals = gray[mask > 0] if (mask is not None and (mask > 0).any()) else gray.ravel()
-        val, _ = cv2.threshold(vals.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-        dark = int((vals <= val).sum())
-        light = int((vals > val).sum())
-        self.invert = dark <= light          # dark minority -> flies are dark
+        """Try BOTH polarities with the current method and pick the one that finds
+        the fewest sensible (1..max_blobs) fly-sized blobs — robust on coloured
+        backgrounds where simple pixel-counting picks the wrong subject."""
         self.auto_threshold = True
-        self.computed_threshold = int(val)
+        target = self.expected_flies or 1
+        best = None                          # (score, invert, n)
+        for inv in (True, False):
+            self.invert = inv
+            n = len(self._detect(frame_bgr))
+            if 1 <= n <= self.max_blobs:
+                score = abs(n - target)      # prefer count near expected, few blobs
+            else:
+                score = 1000 + (n if n > self.max_blobs else 500)  # 0 or too many = bad
+            if best is None or score < best[0]:
+                best = (score, inv, n)
+        self.invert = best[1]
         n = len(self._detect(frame_bgr))
-        return {"invert": self.invert, "threshold": int(val), "detected": n}
+        return {"invert": self.invert, "threshold": int(self.computed_threshold),
+                "detected": n}
 
     # ---- identity association (velocity-predicted -> fewer ID swaps) ----
     def _assign(self, pts):
@@ -253,8 +277,6 @@ class Tracker:
             if not self.trails:
                 self._trailmap.pop(gid, None)
 
-        tag = f"{len(tracks)} tracked · {self.method}"
-        cv2.putText(annotated, tag, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 230, 0), 2)
         return annotated, tracks
 
     def _draw_trails(self, img):
