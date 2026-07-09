@@ -59,7 +59,8 @@ class SessionLogger:
                   "pulse_width_ms", "train_duration_s", "intensity",
                   "dose_mJ_cm2", "detail"]
     TRACK_COLS = ["t_s", "frame", "id", "x_px", "y_px", "x_mm", "y_mm",
-                  "vx_px", "vy_px", "speed_px", "coasting"]
+                  "vx_px", "vy_px", "speed_px", "angle_deg", "major_px", "minor_px",
+                  "coasting"]
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -138,6 +139,9 @@ class SessionLogger:
                     "vx_px": round(tr.get("vx", 0.0), 2),
                     "vy_px": round(tr.get("vy", 0.0), 2),
                     "speed_px": round(tr.get("speed", 0.0), 2),
+                    "angle_deg": round(tr["angle"], 1) if tr.get("angle") is not None else "",
+                    "major_px": round(tr.get("major", 0.0), 1),
+                    "minor_px": round(tr.get("minor", 0.0), 1),
                     "coasting": int(tr.get("coasting", False)),
                 })
                 self.n_track_rows += 1

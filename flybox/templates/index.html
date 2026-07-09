@@ -347,6 +347,15 @@
         </select>
         <small class="hint">detect on a small copy → record hi-res + track fast</small>
       </div>
+      <div class="inline" style="gap:8px;margin-top:8px">
+        <label style="margin:0">Identity assignment</label>
+        <select id="assign" onchange="setTrack()" style="width:auto;padding:6px">
+          <option value="greedy">Greedy (fast)</option>
+          <option value="hungarian">Hungarian (optimal — fewer ID swaps)</option>
+        </select>
+      </div>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="fitEll" onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Fit body ellipse (orientation + length)</label>
       <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
         <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
       <div class="slider" style="margin-top:8px">
@@ -475,6 +484,7 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
     max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
     confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,detect_max_w:+$('detw').value,
+    assignment:$('assign').value,fit_ellipse:$('fitEll').checked,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
 function captureBG(){$('bgInfo').textContent='capturing…';post('/api/track/capture_bg').then(r=>{
@@ -706,6 +716,8 @@ async function refresh(){
     $('confirm').value=s.tracker.confirm_frames;$('confirmVal').textContent=s.tracker.confirm_frames;
     $('expflies').value=s.tracker.expected_flies;
     $('detw').value=s.tracker.detect_max_w;
+    $('assign').value=s.tracker.assignment;
+    $('fitEll').checked=s.tracker.fit_ellipse;
     $('clahe').checked=s.tracker.clahe;
     $('invert').checked=s.tracker.invert;
     $('trailsEn').checked=s.tracker.trails;

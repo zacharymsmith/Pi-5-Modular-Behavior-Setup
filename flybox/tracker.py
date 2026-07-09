@@ -10,12 +10,63 @@ the polarity (dark-on-light vs light-on-dark) and threshold automatically.
 """
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Dict
 
 import cv2
 import numpy as np
+
+
+def _hungarian(cost):
+    """Optimal assignment (Kuhn–Munkres, O(n^2 m)) on a cost matrix.
+    Returns a list of (row, col) pairs minimising total cost. Self-contained so
+    there's no scipy dependency. Reference: classic Hungarian / e-maxx JV form."""
+    cost = np.asarray(cost, dtype=float)
+    n, m = cost.shape
+    transposed = n > m
+    if transposed:
+        cost = cost.T
+        n, m = m, n
+    INF = float("inf")
+    u = [0.0] * (n + 1)
+    v = [0.0] * (m + 1)
+    p = [0] * (m + 1)
+    way = [0] * (m + 1)
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = [INF] * (m + 1)
+        used = [False] * (m + 1)
+        while True:
+            used[j0] = True
+            i0, delta, j1 = p[j0], INF, -1
+            for j in range(1, m + 1):
+                if not used[j]:
+                    cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j], way[j] = cur, j0
+                    if minv[j] < delta:
+                        delta, j1 = minv[j], j
+            for j in range(m + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    pairs = []
+    for j in range(1, m + 1):
+        if p[j] > 0:
+            pairs.append((j - 1, p[j] - 1) if transposed else (p[j] - 1, j - 1))
+    return pairs
 
 from config import (TRACK_THRESHOLD, TRACK_INVERT, TRACK_MIN_AREA, TRACK_MAX_AREA,
                     TRACK_MAX_BLOBS, TRACK_MATCH_DIST_PX, TRACK_AUTO_THRESHOLD,
@@ -47,6 +98,8 @@ class Tracker:
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
     match_dist: int = TRACK_MATCH_DIST_PX
+    assignment: str = "greedy"                 # "greedy" | "hungarian" (optimal)
+    fit_ellipse: bool = False                  # fit body ellipse (orientation + axes)
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
     confirm_frames: int = TRACK_CONFIRM_FRAMES # new blob must persist this long to become a track
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
@@ -192,7 +245,7 @@ class Tracker:
         cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
         min_a, max_a = self.min_area * scale * scale, self.max_area * scale * scale
-        pts = []
+        dets = []
         for c in cnts:
             a = cv2.contourArea(c)
             if a < min_a or a > max_a:
@@ -200,10 +253,18 @@ class Tracker:
             M = cv2.moments(c)
             if M["m00"] == 0:
                 continue
-            pts.append((int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])))
-            if len(pts) >= self.max_blobs:
+            x, y = M["m10"] / M["m00"], M["m01"] / M["m00"]
+            angle, major, minor = None, 0.0, 0.0
+            if self.fit_ellipse and len(c) >= 5:
+                try:
+                    (_, _), (ax1, ax2), ang = cv2.fitEllipse(c)
+                    major, minor, angle = max(ax1, ax2), min(ax1, ax2), float(ang)
+                except cv2.error:
+                    pass
+            dets.append({"x": x, "y": y, "angle": angle, "major": major, "minor": minor})
+            if len(dets) >= self.max_blobs:
                 break
-        return pts
+        return dets
 
     # ---- auto-tune from a live frame -----------------------------------
     def auto_tune(self, frame_bgr):
@@ -228,35 +289,65 @@ class Tracker:
                 "detected": n}
 
     # ---- identity association (velocity-predicted -> fewer ID swaps) ----
-    def _assign(self, pts):
+    def _match(self, prev, dets):
+        """Return {det_index: prev_track}. Greedy nearest-neighbour, or optimal
+        Hungarian assignment (fewer ID swaps when flies cross)."""
+        matches = {}
+        if not prev or not dets:
+            return matches
+        d2 = self.match_dist ** 2
+        if self.assignment == "hungarian":
+            big = d2 * 1000 + 1
+            cost = np.empty((len(prev), len(dets)), dtype=float)
+            for i, p in enumerate(prev):
+                for j, dd in enumerate(dets):
+                    c = (dd["x"] - p["px"]) ** 2 + (dd["y"] - p["py"]) ** 2
+                    cost[i, j] = c if c <= d2 else big     # forbid too-far links
+            for i, j in _hungarian(cost):
+                if cost[i, j] <= d2:
+                    matches[j] = prev[i]
+        else:                                              # greedy
+            used = set()
+            for j, dd in enumerate(dets):
+                best, bestd = None, d2
+                for p in prev:
+                    if p["id"] in used:
+                        continue
+                    c = (dd["x"] - p["px"]) ** 2 + (dd["y"] - p["py"]) ** 2
+                    if c < bestd:
+                        best, bestd = p, c
+                if best is not None:
+                    used.add(best["id"])
+                    matches[j] = best
+        return matches
+
+    def _assign(self, dets):
         prev = list(self._prev)
         for p in prev:  # predict where each fly should be this frame
             p["px"] = p["x"] + p.get("vx", 0.0)
             p["py"] = p["y"] + p.get("vy", 0.0)
-        tracks, used = [], set()
+        matches = self._match(prev, dets)
+        tracks, matched_ids = [], set()
         a = 0.5  # velocity smoothing
-        for (x, y) in pts:
-            best, bestd = None, self.match_dist ** 2
-            for p in prev:
-                if p["id"] in used:
-                    continue
-                d = (x - p["px"]) ** 2 + (y - p["py"]) ** 2   # match to prediction
-                if d < bestd:
-                    best, bestd = p, d
+        for j, dd in enumerate(dets):
+            x, y = int(round(dd["x"])), int(round(dd["y"]))
+            ell = {"angle": dd.get("angle"), "major": dd.get("major", 0.0),
+                   "minor": dd.get("minor", 0.0)}
+            best = matches.get(j)
             if best is not None:
-                used.add(best["id"])
+                matched_ids.add(best["id"])
                 vx = a * (x - best["x"]) + (1 - a) * best.get("vx", 0.0)
                 vy = a * (y - best["y"]) + (1 - a) * best.get("vy", 0.0)
                 tracks.append({"id": best["id"], "x": x, "y": y, "vx": vx, "vy": vy,
-                               "speed": (vx * vx + vy * vy) ** 0.5,
-                               "missed": 0, "coasting": False, "age": best.get("age", 0) + 1})
+                               "speed": (vx * vx + vy * vy) ** 0.5, "missed": 0,
+                               "coasting": False, "age": best.get("age", 0) + 1, **ell})
             else:
                 tracks.append({"id": self._next_id, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
-                               "speed": 0.0, "missed": 0, "coasting": False, "age": 1})
+                               "speed": 0.0, "missed": 0, "coasting": False, "age": 1, **ell})
                 self._next_id += 1
         # coast unmatched previous tracks through the gap (holds identity + trigger)
         for p in prev:
-            if p["id"] in used:
+            if p["id"] in matched_ids:
                 continue
             missed = p.get("missed", 0) + 1
             if missed > self.max_missed:
@@ -264,7 +355,9 @@ class Tracker:
             vx, vy = p.get("vx", 0.0) * 0.85, p.get("vy", 0.0) * 0.85
             tracks.append({"id": p["id"], "x": int(round(p["px"])), "y": int(round(p["py"])),
                            "vx": vx, "vy": vy, "speed": (vx * vx + vy * vy) ** 0.5,
-                           "missed": missed, "coasting": True, "age": p.get("age", 0)})
+                           "missed": missed, "coasting": True, "age": p.get("age", 0),
+                           "angle": p.get("angle"), "major": p.get("major", 0.0),
+                           "minor": p.get("minor", 0.0)})
         return tracks
 
     def process(self, frame_bgr):
@@ -287,10 +380,12 @@ class Tracker:
         if self.detect_max_w and fw > self.detect_max_w:
             sc = self.detect_max_w / float(fw)
             det = cv2.resize(frame_bgr, (0, 0), fx=sc, fy=sc)
-            pts = [(int(x / sc), int(y / sc)) for (x, y) in self._detect(det, sc)]
+            dets = self._detect(det, sc)
+            for d in dets:                       # scale detections back to full res
+                d["x"] /= sc; d["y"] /= sc; d["major"] /= sc; d["minor"] /= sc
         else:
-            pts = self._detect(frame_bgr)
-        pool = self._assign(pts)
+            dets = self._detect(frame_bgr)
+        pool = self._assign(dets)
         self._prev = pool                       # full pool (incl. tentative) carries age
         # report only CONFIRMED tracks (survived confirm_frames) -> kills phantoms
         confirmed = [t for t in pool if t.get("age", 0) >= self.confirm_frames]
@@ -310,7 +405,16 @@ class Tracker:
                     dq = deque(dq, maxlen=self.trail_len)
                     self._trailmap[t["id"]] = dq
                 dq.append((t["x"], t["y"]))
-            cv2.circle(annotated, (t["x"], t["y"]), 10, col, 1 if coasting else 2)
+            if self.fit_ellipse and t.get("angle") is not None and t.get("major", 0) > 0:
+                cv2.ellipse(annotated, (t["x"], t["y"]),
+                            (max(1, int(t["major"] / 2)), max(1, int(t["minor"] / 2))),
+                            t["angle"], 0, 360, col, 1)
+                th = math.radians(t["angle"])                # heading along body axis
+                hx = int(t["x"] + math.sin(th) * t["major"] / 2)
+                hy = int(t["y"] - math.cos(th) * t["major"] / 2)
+                cv2.line(annotated, (t["x"], t["y"]), (hx, hy), col, 1)
+            else:
+                cv2.circle(annotated, (t["x"], t["y"]), 10, col, 1 if coasting else 2)
             cv2.putText(annotated, str(t["id"]) + ("?" if coasting else ""),
                         (t["x"] + 8, t["y"] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
         for gid in [k for k in self._trailmap if k not in live_ids]:
@@ -344,7 +448,8 @@ class Tracker:
                 "invert": self.invert, "min_area": self.min_area, "max_area": self.max_area,
                 "tophat_kernel": self.tophat_kernel, "max_missed": self.max_missed,
                 "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
-                "detect_max_w": self.detect_max_w, "clahe": self.clahe,
+                "detect_max_w": self.detect_max_w, "assignment": self.assignment,
+                "fit_ellipse": self.fit_ellipse, "clahe": self.clahe,
                 "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
                 "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,
