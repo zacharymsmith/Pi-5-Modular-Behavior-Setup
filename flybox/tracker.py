@@ -97,10 +97,36 @@ class Tracker:
         self._bgsub = None
 
     def capture_background(self, frame_bgr):
-        """Snapshot the current frame as the empty-arena reference for 'refsub'."""
+        """Snapshot the current frame as the reference (use with an empty arena)."""
         gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
         self._ref = gray
         return {"ok": True, "shape": list(gray.shape)}
+
+    def build_background(self, frames_bgr):
+        """Per-pixel MEDIAN of several frames -> a fly-free reference even when
+        flies are present (they move, so the median at each pixel is the arena).
+        Let the flies move around while these frames are captured."""
+        grays = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames_bgr if f is not None]
+        if len(grays) < 3:
+            return {"ok": False, "error": "not enough frames"}
+        med = np.median(np.stack(grays), axis=0).astype(np.uint8)
+        self._ref = cv2.GaussianBlur(med, (5, 5), 0)
+        return {"ok": True, "n_frames": len(grays)}
+
+    def patch_background(self, frame_bgr, nx1, ny1, nx2, ny2):
+        """Copy the CURRENT frame's pixels in a drawn box into the reference —
+        drag over any spot with no fly to fix/refine the background there."""
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        if self._ref is None or self._ref.shape != gray.shape:
+            self._ref = gray.copy()
+        h, w = gray.shape
+        x1, x2 = sorted((int(nx1 * w), int(nx2 * w)))
+        y1, y2 = sorted((int(ny1 * h), int(ny2 * h)))
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 > x1 and y2 > y1:
+            self._ref[y1:y2, x1:x2] = gray[y1:y2, x1:x2]
+        return {"ok": True}
 
     def _binarize(self, frame_bgr):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)

@@ -5,6 +5,7 @@ Run:  python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import asdict
 
 from fastapi import FastAPI
@@ -357,6 +358,32 @@ def capture_bg():
     if frame is None:
         return {"ok": False, "error": "no camera frame yet"}
     return tracker.capture_background(frame)
+
+
+class BuildBgIn(BaseModel):
+    seconds: float = 3.0
+
+
+@app.post("/api/track/build_bg")
+def build_bg(b: BuildBgIn):
+    """Median background from frames sampled over a few seconds — works with flies
+    present as long as they move a little."""
+    n = max(6, int(b.seconds * 8))
+    frames = []
+    for _ in range(n):
+        f = camera.latest_frame()
+        if f is not None:
+            frames.append(f)
+        time.sleep(max(0.02, b.seconds / n))
+    return tracker.build_background(frames)
+
+
+@app.post("/api/track/patch_bg")
+def patch_bg(a: ArenaIn):
+    frame = camera.latest_frame()
+    if frame is None:
+        return {"ok": False, "error": "no camera frame yet"}
+    return tracker.patch_background(frame, a.nx1, a.ny1, a.nx2, a.ny2)
 
 
 @app.get("/api/track/mask.jpg")

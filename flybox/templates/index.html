@@ -120,6 +120,7 @@
             <button type="button" data-v="arena" class="on">Arena</button>
             <button type="button" data-v="red">Red zone</button>
             <button type="button" data-v="blue">Blue zone</button>
+            <button type="button" data-v="bgpatch">BG patch</button>
           </div>
         </div>
         <div class="drawrow">
@@ -308,8 +309,11 @@
         </select>
         <button class="ghost sm" onclick="resetBG()">Reset BG</button>
       </div>
-      <div class="rowbtns"><button class="primary sm" onclick="captureBG()">📸 Capture background (empty arena)</button>
-        <small class="hint" id="bgInfo">for Reference subtraction — remove flies, then click</small></div>
+      <div class="rowbtns">
+        <button class="primary sm" onclick="buildBG()">🌗 Build background</button>
+        <button class="ghost sm" onclick="captureBG()">📸 Snapshot (empty arena)</button>
+      </div>
+      <small class="hint" id="bgInfo">Build = median over ~3 s (flies can be present, let them move). Or use the “BG patch” draw tool to grab a fly-free spot.</small>
       <div class="slider" style="margin-top:8px">
         <label>Feature size</label><input id="tophat" type="range" min="9" max="81" step="2" value="25" oninput="setTrack()">
         <span class="val" id="tophatVal">25</span>
@@ -455,7 +459,10 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
 function captureBG(){$('bgInfo').textContent='capturing…';post('/api/track/capture_bg').then(r=>{
-  $('bgInfo').textContent=r.ok?'background captured ✓ — switch method to Reference subtraction':(r.error||'failed');});}
+  $('bgInfo').textContent=r.ok?'snapshot captured ✓ — set method to Reference subtraction':(r.error||'failed');});}
+function buildBG(){$('bgInfo').textContent='building median background (~3 s, let flies move)…';
+  post('/api/track/build_bg',{seconds:3}).then(r=>{
+    $('bgInfo').textContent=r.ok?`background built from ${r.n_frames} frames ✓ — set method to Reference subtraction`:(r.error||'failed');});}
 let maskShown=false;
 function toggleMask(){maskShown=!maskShown;$('maskimg').style.display=maskShown?'block':'none';
   $('maskBtn').textContent=maskShown?'Hide detection mask':'Show detection mask';}
@@ -558,10 +565,12 @@ function initSeg(id,cb){const seg=$(id);seg.querySelectorAll('button').forEach(b
     b.classList.add('on');cb(b.dataset.v);});});}
 initSeg('segTarget',v=>{drawTarget=v;updateHint();});
 initSeg('segShape',v=>{drawShape=v;updateHint();});
-function updateHint(){const t=drawTarget==='arena'?'arena mask':drawTarget+' zone';
+function updateHint(){
+  if(drawTarget==='bgpatch'){$('drawHint').textContent='BG patch — drag a box over a fly-free spot to grab it into the background.';return;}
+  const t=drawTarget==='arena'?'arena mask':drawTarget+' zone';
   const how=drawShape==='ellipse'?'click the centre, drag outward to the edge':'drag a box corner-to-corner';
   $('drawHint').textContent=`${t} — ${how}.`;}
-function drawColor(){return drawTarget==='arena'?'#ffff00':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
+function drawColor(){return drawTarget==='arena'?'#ffff00':drawTarget==='bgpatch'?'#00e5ff':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
 
 const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
 function fit(){const r=$('preview').getBoundingClientRect();cv.width=Math.round(r.width);cv.height=Math.round(r.height);}
@@ -582,7 +591,8 @@ cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2
   drag=null;setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
   const nx1=x1/cv.width,ny1=y1/cv.height,nx2=x2/cv.width,ny2=y2/cv.height;
   if(Math.abs(nx2-nx1)<0.02||Math.abs(ny2-ny1)<0.02)return;
-  if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
+  if(drawTarget==='bgpatch') post('/api/track/patch_bg',{nx1,ny1,nx2,ny2}).then(()=>{$('bgInfo').textContent='background patched ✓';});
+  else if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
   else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
 function clearArena(){post('/api/track/roi/clear').then(refresh);}
 
