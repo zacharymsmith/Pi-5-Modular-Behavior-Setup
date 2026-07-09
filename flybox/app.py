@@ -366,7 +366,10 @@ def capture_bg():
     frame = camera.latest_frame()
     if frame is None:
         return {"ok": False, "error": "no camera frame yet"}
-    return tracker.capture_background(frame)
+    res = tracker.capture_background(frame)
+    if res.get("ok"):
+        tracker.method = "refsub"          # auto-switch so the reference is used
+    return res
 
 
 class BuildBgIn(BaseModel):
@@ -384,7 +387,10 @@ def build_bg(b: BuildBgIn):
         if f is not None:
             frames.append(f)
         time.sleep(max(0.02, b.seconds / n))
-    return tracker.build_background(frames)
+    res = tracker.build_background(frames)
+    if res.get("ok"):
+        tracker.method = "refsub"          # auto-switch so the reference is used
+    return res
 
 
 @app.post("/api/track/patch_bg")

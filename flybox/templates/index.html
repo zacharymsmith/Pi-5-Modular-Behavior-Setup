@@ -488,10 +488,12 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 function resetBG(){post('/api/track/reset_bg');}
 function captureBG(){$('bgInfo').textContent='capturing…';post('/api/track/capture_bg').then(r=>{
-  $('bgInfo').textContent=r.ok?'snapshot captured ✓ — set method to Reference subtraction':(r.error||'failed');});}
+  $('bgInfo').textContent=r.ok?'snapshot captured ✓ — method switched to Reference subtraction':(r.error||'failed');
+  built=false;refresh();});}
 function buildBG(){$('bgInfo').textContent='building median background (~3 s, let flies move)…';
   post('/api/track/build_bg',{seconds:3}).then(r=>{
-    $('bgInfo').textContent=r.ok?`background built from ${r.n_frames} frames ✓ — set method to Reference subtraction`:(r.error||'failed');});}
+    $('bgInfo').textContent=r.ok?`background built from ${r.n_frames} frames ✓ — method switched to Reference subtraction`:(r.error||'failed');
+    built=false;refresh();});}
 let maskShown=false;
 function toggleMask(){maskShown=!maskShown;$('maskimg').style.display=maskShown?'block':'none';
   $('maskBtn').textContent=maskShown?'Hide detection mask':'Show detection mask';}
