@@ -25,6 +25,8 @@
   .zoomctl span{font-size:12px;color:var(--muted);min-width:40px;text-align:center}
   main{display:grid;grid-template-columns:minmax(420px,1.1fr) 1fr;gap:18px;padding:18px;max-width:1500px;margin:0 auto}
   @media(max-width:1000px){main{grid-template-columns:1fr}}
+  body.wide main{grid-template-columns:1fr;max-width:1300px}
+  body.wide .previewWrap{max-width:100%}
   .col{display:flex;flex-direction:column;gap:18px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
   .card h2{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
@@ -112,8 +114,11 @@
   <!-- LEFT -->
   <div class="col">
     <section class="card">
-      <h2>Camera</h2>
-      <p class="sub">Drag on the video to add a trigger zone for the selected channel.</p>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <h2>Camera</h2>
+        <button class="ghost sm" onclick="toggleWide()">⤢ Enlarge</button>
+      </div>
+      <p class="sub">Use the Draw tools below to set the arena and trigger zones.</p>
       <div class="previewWrap">
         <img id="preview" src="/stream.mjpg" alt="live preview">
         <canvas id="roiCanvas"></canvas>
@@ -305,83 +310,94 @@
         <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
       <div class="rowbtns"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
         <small class="hint" id="tuneInfo"></small></div>
-      <label style="margin-top:10px">Detection method (compare per arena)</label>
-      <div class="inline" style="gap:8px">
-        <select id="method" onchange="setTrack()" style="flex:1">
-          <option value="refsub">Reference subtraction (best for static arena)</option>
-          <option value="tophat">Illumination-invariant</option>
-          <option value="threshold">Threshold (Otsu / manual)</option>
-          <option value="bgsub">Background subtraction (moving flies)</option>
-          <option value="adaptive">Adaptive (uneven lighting)</option>
-        </select>
-        <button class="ghost sm" onclick="resetBG()">Reset BG</button>
+      <label style="margin-top:10px">Detection method</label>
+      <select id="method" onchange="setTrack();updateMethodUI()" style="width:100%">
+        <option value="refsub">Reference subtraction (recommended)</option>
+        <option value="tophat">Illumination-invariant</option>
+        <option value="threshold">Threshold (Otsu / manual)</option>
+      </select>
+
+      <div id="grpRefsub">
+        <div class="rowbtns" style="margin-top:8px">
+          <button class="primary sm" onclick="buildBG()">🌗 Build background</button>
+          <button class="ghost sm" onclick="captureBG()">📸 Snapshot (empty)</button>
+          <button class="ghost sm" onclick="resetBG()">Reset</button>
+        </div>
+        <small class="hint" id="bgInfo">Draw the arena tight to the dish, then Build (median over ~3 s — flies may be present, let them move). Validated best method on your footage.</small>
       </div>
-      <div class="rowbtns">
-        <button class="primary sm" onclick="buildBG()">🌗 Build background</button>
-        <button class="ghost sm" onclick="captureBG()">📸 Snapshot (empty arena)</button>
-      </div>
-      <small class="hint" id="bgInfo">Build = median over ~3 s (flies can be present, let them move). Or use the “BG patch” draw tool to grab a fly-free spot.</small>
-      <div class="slider" style="margin-top:8px">
+
+      <div id="grpTophat" class="slider" style="margin-top:8px">
         <label>Feature size</label><input id="tophat" type="range" min="9" max="81" step="2" value="25" oninput="setTrack()">
         <span class="val" id="tophatVal">25</span>
       </div>
-      <div class="slider">
-        <label>Coast frames</label><input id="maxmiss" type="range" min="0" max="45" value="12" oninput="setTrack()">
-        <span class="val" id="maxmissVal">12</span>
+
+      <div id="grpThresh">
+        <label class="switch" style="margin-top:8px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
+          <span class="track"><span class="knob"></span></span> Auto threshold (Otsu)</label>
+        <div class="slider" style="margin-top:8px">
+          <label>Thresh</label><input id="thresh" type="range" min="0" max="255" value="60" oninput="setTrack()">
+          <span class="val" id="threshVal">60</span>
+        </div>
       </div>
-      <div class="slider">
-        <label>Confirm frames</label><input id="confirm" type="range" min="1" max="20" value="4" oninput="setTrack()">
-        <span class="val" id="confirmVal">4</span>
-      </div>
-      <div class="inline" style="gap:8px;margin-top:4px">
+
+      <div class="inline" style="gap:8px;margin-top:10px">
         <label style="margin:0">Expected flies (0 = any)</label>
-        <input id="expflies" type="number" min="0" max="20" value="0" style="width:70px" onchange="setTrack()">
+        <input id="expflies" type="number" min="0" max="20" value="2" style="width:70px" onchange="setTrack()">
+        <small class="hint">set to your fly count → caps over-detection</small>
       </div>
-      <div class="inline" style="gap:8px;margin-top:8px">
-        <label style="margin:0">Track at</label>
-        <select id="detw" onchange="setTrack()" style="width:auto;padding:6px">
-          <option value="0">full resolution</option>
-          <option value="960">960 px (fast)</option>
-          <option value="800">800 px (faster)</option>
-          <option value="640">640 px (fastest)</option>
-        </select>
-        <small class="hint">detect on a small copy → record hi-res + track fast</small>
-      </div>
-      <div class="inline" style="gap:8px;margin-top:8px">
-        <label style="margin:0">Identity assignment</label>
-        <select id="assign" onchange="setTrack()" style="width:auto;padding:6px">
-          <option value="greedy">Greedy (fast)</option>
-          <option value="hungarian">Hungarian (optimal — fewer ID swaps)</option>
-        </select>
-      </div>
-      <label class="switch" style="margin-top:8px"><input type="checkbox" id="fitEll" onchange="setTrack()">
-        <span class="track"><span class="knob"></span></span> Fit body ellipse (orientation + length)</label>
-      <label class="switch" style="margin-top:10px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
-        <span class="track"><span class="knob"></span></span> Auto threshold (Otsu — robust)</label>
-      <div class="slider" style="margin-top:8px">
-        <label>Thresh</label><input id="thresh" type="range" min="0" max="255" value="60" oninput="setTrack()">
-        <span class="val" id="threshVal">60</span>
-      </div>
-      <div class="slider">
-        <label>Min area</label><input id="minarea" type="range" min="1" max="500" value="4" oninput="setTrack()">
-        <span class="val" id="minareaVal">4</span>
-      </div>
-      <div class="slider">
-        <label>Max area</label><input id="maxarea" type="range" min="100" max="20000" step="100" value="4000" oninput="setTrack()">
-        <span class="val" id="maxareaVal">4000</span>
-      </div>
-      <label class="switch" style="margin-top:6px"><input type="checkbox" id="invert" checked onchange="setTrack()">
-        <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
-      <label class="switch" style="margin-top:8px"><input type="checkbox" id="clahe" onchange="setTrack()">
-        <span class="track"><span class="knob"></span></span> Boost contrast (CLAHE)</label>
-      <div class="rowbtns"><button class="ghost sm" onclick="toggleMask()"><span id="maskBtn">Show detection mask</span></button>
+
+      <div class="rowbtns" style="margin-top:8px"><button class="ghost sm" onclick="toggleMask()"><span id="maskBtn">Show detection mask</span></button>
         <small class="hint">see exactly what the tracker detects</small></div>
       <img id="maskimg" src="/api/track/mask.jpg" style="display:none;width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain;margin-top:8px">
-      <label class="switch" style="margin-top:8px"><input type="checkbox" id="trailsEn" onchange="setTrack()">
-        <span class="track"><span class="knob"></span></span> Motion trails overlay</label>
-      <div class="slider"><label>Trail len</label>
-        <input id="trailLen" type="range" min="5" max="120" value="30" oninput="setTrack()">
-        <span class="val" id="trailLenVal">30</span></div>
+
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:#8ab4ff;font-size:13px;user-select:none">Advanced tuning</summary>
+        <div style="margin-top:10px">
+          <div class="slider">
+            <label>Blob size min</label><input id="minarea" type="range" min="10" max="300" value="25" oninput="setTrack()">
+            <span class="val" id="minareaVal">25</span>
+          </div>
+          <div class="slider">
+            <label>Blob size max</label><input id="maxarea" type="range" min="500" max="8000" step="100" value="4000" oninput="setTrack()">
+            <span class="val" id="maxareaVal">4000</span>
+          </div>
+          <div class="slider">
+            <label>Coast frames</label><input id="maxmiss" type="range" min="0" max="45" value="12" oninput="setTrack()">
+            <span class="val" id="maxmissVal">12</span>
+          </div>
+          <div class="slider">
+            <label>Confirm frames</label><input id="confirm" type="range" min="1" max="20" value="3" oninput="setTrack()">
+            <span class="val" id="confirmVal">3</span>
+          </div>
+          <div class="inline" style="gap:8px;margin-top:8px">
+            <label style="margin:0">Track at</label>
+            <select id="detw" onchange="setTrack()" style="width:auto;padding:6px">
+              <option value="0">full resolution</option>
+              <option value="960">960 px (fast)</option>
+              <option value="800">800 px (faster)</option>
+              <option value="640">640 px (fastest)</option>
+            </select>
+          </div>
+          <div class="inline" style="gap:8px;margin-top:8px">
+            <label style="margin:0">Identity assignment</label>
+            <select id="assign" onchange="setTrack()" style="width:auto;padding:6px">
+              <option value="greedy">Greedy (fast)</option>
+              <option value="hungarian">Hungarian (optimal)</option>
+            </select>
+          </div>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="fitEll" onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Fit body ellipse (orientation + length)</label>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="invert" checked onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="clahe" onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Boost contrast (CLAHE)</label>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="trailsEn" onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Motion trails overlay</label>
+          <div class="slider"><label>Trail len</label>
+            <input id="trailLen" type="range" min="5" max="120" value="30" oninput="setTrack()">
+            <span class="val" id="trailLenVal">30</span></div>
+        </div>
+      </details>
       <div class="kv" style="margin-top:12px"><span>Currently tracked</span><b id="trackCount">0</b></div>
     </section>
 
@@ -637,6 +653,11 @@ cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2
   else if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
   else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
 function clearArena(){post('/api/track/roi/clear').then(refresh);}
+function toggleWide(){document.body.classList.toggle('wide');setTimeout(fit,80);}
+function updateMethodUI(){const m=$('method').value;
+  $('grpRefsub').style.display=(m==='refsub')?'':'none';
+  $('grpTophat').style.display=(m==='tophat')?'':'none';
+  $('grpThresh').style.display=(m==='threshold')?'':'none';}
 
 // status
 let built=false, lastCamKey='';
@@ -708,7 +729,7 @@ async function refresh(){
     $('mockEn').checked=s.camera.mock;
     // tracking
     $('trackEn').checked=s.tracker.enabled;
-    $('method').value=s.tracker.method;
+    $('method').value=s.tracker.method;updateMethodUI();
     $('autoThr').checked=s.tracker.auto_threshold;
     $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;$('thresh').disabled=s.tracker.auto_threshold;
     $('minarea').value=s.tracker.min_area;$('minareaVal').textContent=s.tracker.min_area;

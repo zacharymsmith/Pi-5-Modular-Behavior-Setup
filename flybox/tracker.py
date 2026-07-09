@@ -76,12 +76,13 @@ from config import (TRACK_THRESHOLD, TRACK_INVERT, TRACK_MIN_AREA, TRACK_MAX_ARE
 _ID_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
               (0, 255, 255), (200, 100, 255), (120, 255, 120), (255, 255, 0)]
 _KERNEL = np.ones((3, 3), np.uint8)
+_KERNEL5 = np.ones((5, 5), np.uint8)
 
 
 @dataclass
 class Tracker:
     enabled: bool = False
-    method: str = "tophat"       # "tophat" | "threshold" | "bgsub" | "adaptive"
+    method: str = "refsub"       # "refsub" (recommended) | "tophat" | "threshold"
     auto_threshold: bool = TRACK_AUTO_THRESHOLD
     threshold: int = TRACK_THRESHOLD
     invert: bool = TRACK_INVERT
@@ -98,6 +99,7 @@ class Tracker:
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
     match_dist: int = TRACK_MATCH_DIST_PX
+    solidity: float = 0.4                      # reject thin/edge blobs (area/hull); 0 = off
     assignment: str = "greedy"                 # "greedy" | "hungarian" (optimal)
     fit_ellipse: bool = False                  # fit body ellipse (orientation + axes)
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
@@ -200,11 +202,21 @@ class Tracker:
                 ref = self._ref
                 if ref.shape != gray.shape:
                     ref = cv2.resize(ref, (gray.shape[1], gray.shape[0]))
+                # brightness-normalise the frame to the reference (within the arena
+                # ROI if set) — cancels opto flashes / gain drift that would
+                # otherwise flood the difference image. (95% clean on test footage.)
+                m = self._get_mask(gray.shape[1], gray.shape[0])
+                if m is not None and int((m > 0).sum()) > 0:
+                    cm, rm = float(gray[m > 0].mean()), float(ref[m > 0].mean())
+                else:
+                    cm, rm = float(gray.mean()), float(ref.mean())
+                if cm > 1:
+                    gray = np.clip(gray.astype(np.float32) * (rm / cm), 0, 255).astype(np.uint8)
                 diff = cv2.absdiff(gray, ref)
-                if int(diff.max()) < 20:
+                if int(diff.max()) < 18:
                     th = np.zeros(gray.shape, np.uint8)      # nothing changed
                 else:
-                    _, th = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+                    _, th = cv2.threshold(diff, 22, 255, cv2.THRESH_BINARY)
         elif self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
             # black-hat isolates dark spots on a bright bg; top-hat the reverse.
@@ -234,8 +246,9 @@ class Tracker:
             else:
                 _, th = cv2.threshold(gray, int(self.threshold), 255, mode)
                 self.computed_threshold = int(self.threshold)
-        th = cv2.morphologyEx(th, cv2.MORPH_OPEN, _KERNEL)
-        mask = self._get_mask(th.shape[1], th.shape[0])   # limit to arena ROI
+        th = cv2.morphologyEx(th, cv2.MORPH_OPEN, _KERNEL)     # drop speck noise
+        th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, _KERNEL5)   # merge fly fragments
+        mask = self._get_mask(th.shape[1], th.shape[0])        # limit to arena ROI
         if mask is not None:
             th = cv2.bitwise_and(th, mask)
         return th
@@ -250,6 +263,10 @@ class Tracker:
             a = cv2.contourArea(c)
             if a < min_a or a > max_a:
                 continue
+            if self.solidity > 0 and len(c) >= 3:   # reject thin/edge artefacts
+                ha = cv2.contourArea(cv2.convexHull(c))
+                if ha > 0 and a / ha < self.solidity:
+                    continue
             M = cv2.moments(c)
             if M["m00"] == 0:
                 continue
@@ -449,7 +466,7 @@ class Tracker:
                 "tophat_kernel": self.tophat_kernel, "max_missed": self.max_missed,
                 "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
                 "detect_max_w": self.detect_max_w, "assignment": self.assignment,
-                "fit_ellipse": self.fit_ellipse, "clahe": self.clahe,
+                "fit_ellipse": self.fit_ellipse, "solidity": self.solidity, "clahe": self.clahe,
                 "bgsub_var": self.bgsub_var, "adaptive_block": self.adaptive_block,
                 "adaptive_C": self.adaptive_C,
                 "trails": self.trails, "trail_len": self.trail_len,

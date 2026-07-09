@@ -62,13 +62,13 @@ TRAIL_LENGTH = 30               # frames of history to draw
 TRACK_AUTO_THRESHOLD = True    # Otsu auto-threshold (adapts to lighting) — robust default
 TRACK_THRESHOLD = 60           # manual 0..255 grayscale threshold (used when auto is off)
 TRACK_INVERT = True            # True = dark subject on light background
-TRACK_MIN_AREA = 4             # px; ignore blobs smaller than this
+TRACK_MIN_AREA = 25            # px; ignore blobs smaller than this (fly ~50-100px at 1024px)
 TRACK_MAX_AREA = 4000          # px; ignore blobs bigger than this (e.g. arena/reflections)
 TRACK_MAX_BLOBS = 10           # cap detections per frame
 TRACK_MATCH_DIST_PX = 90       # max px a fly can move between frames to keep its ID
 TRACK_TOPHAT_KERNEL = 25       # px; ~2x fly body length (illumination-invariant method)
 TRACK_MAX_MISSED = 12          # frames to coast a track through a detection gap (keeps ID)
-TRACK_CONFIRM_FRAMES = 4       # a new blob must persist this many frames before it gets an ID
+TRACK_CONFIRM_FRAMES = 3       # a new blob must persist this many frames before it gets an ID
 TRACK_EXPECTED_FLIES = 0       # cap on reported flies (0 = unlimited); e.g. 1 for single-fly assays
 TRACK_DETECT_MAX_W = 0         # downscale detection to this width (0 = full res); lets you
                                # record hi-res while tracking fast (e.g. 800)
