@@ -72,6 +72,7 @@ class TrackIn(BaseModel):
     assignment: str | None = None
     fit_ellipse: bool | None = None
     clahe: bool | None = None
+    sensitivity: int | None = None
     trails: bool | None = None
     trail_len: int | None = None
 
@@ -83,6 +84,8 @@ class CameraConfigIn(BaseModel):
     auto_exposure: bool | None = None
     exposure_us: int | None = None
     gain: float | None = None
+    contrast: float | None = None
+    brightness: float | None = None
 
 
 class PresetIn(BaseModel):
@@ -307,6 +310,8 @@ def set_track(t: TrackIn):
         tracker.fit_ellipse = t.fit_ellipse
     if t.clahe is not None:
         tracker.clahe = t.clahe
+    if t.sensitivity is not None:
+        tracker.sensitivity = max(0, min(100, t.sensitivity))
     if t.trails is not None:
         tracker.trails = t.trails
         if not t.trails:
@@ -470,7 +475,8 @@ def camera_config(c: CameraConfigIn):
     if c.width is not None and c.height is not None:
         size = (c.width, c.height)
     err = camera.apply_config(size=size, fps=c.fps, auto_exposure=c.auto_exposure,
-                              exposure_us=c.exposure_us, gain=c.gain)
+                              exposure_us=c.exposure_us, gain=c.gain,
+                              contrast=c.contrast, brightness=c.brightness)
     return {"ok": err is None, "error": err, "camera": camera.status()}
 
 
@@ -492,7 +498,7 @@ def _gather_config() -> dict:
                     "confirm_frames": tracker.confirm_frames, "expected_flies": tracker.expected_flies,
                     "detect_max_w": tracker.detect_max_w, "assignment": tracker.assignment,
                     "fit_ellipse": tracker.fit_ellipse, "clahe": tracker.clahe,
-                    "solidity": tracker.solidity,
+                    "solidity": tracker.solidity, "sensitivity": tracker.sensitivity,
                     "roi": tracker.roi,
                     "trails": tracker.trails, "trail_len": tracker.trail_len},
         "camera": {"width": s["size"][0], "height": s["size"][1],
@@ -518,7 +524,7 @@ def _apply_config(d: dict):
     for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
               "tophat_kernel", "max_missed", "confirm_frames", "expected_flies",
               "detect_max_w", "assignment", "fit_ellipse", "clahe", "solidity",
-              "trails", "trail_len"):
+              "sensitivity", "trails", "trail_len"):
         if k in tk:
             setattr(tracker, k, tk[k])
     if "roi" in tk:                      # arena ROI (rebuild mask on load)
@@ -535,7 +541,8 @@ def _apply_config(d: dict):
             size=(cam.get("width"), cam.get("height"))
             if cam.get("width") and cam.get("height") else None,
             fps=cam.get("fps"), auto_exposure=cam.get("auto_exposure"),
-            exposure_us=cam.get("exposure_us"), gain=cam.get("gain"))
+            exposure_us=cam.get("exposure_us"), gain=cam.get("gain"),
+            contrast=cam.get("contrast"), brightness=cam.get("brightness"))
 
 
 @app.get("/api/presets")

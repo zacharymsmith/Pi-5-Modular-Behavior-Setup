@@ -103,6 +103,8 @@ class Tracker:
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
     match_dist: int = TRACK_MATCH_DIST_PX
+    sensitivity: int = 50                      # 0-100: higher = catch fainter flies (lower diff
+                                               # threshold), lower = stricter (less noise). 50 = default
     solidity: float = 0.4                      # reject thin/edge blobs (area/hull); 0 = off
     assignment: str = "greedy"                 # "greedy" | "hungarian" (optimal)
     fit_ellipse: bool = False                  # fit body ellipse (orientation + axes)
@@ -229,7 +231,10 @@ class Tracker:
                 dvals = diff[dm > 0] if dm is not None else diff.reshape(-1)
                 otsu, _ = cv2.threshold(dvals.reshape(-1, 1).astype(np.uint8),
                                         0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                thr = int(min(45, max(10, otsu)))
+                # sensitivity slides the floor/ceiling: high = catch fainter flies.
+                floor = int(np.interp(self.sensitivity, [0, 50, 100], [30, 10, 4]))
+                ceil = int(np.interp(self.sensitivity, [0, 50, 100], [80, 45, 25]))
+                thr = int(min(ceil, max(floor, otsu)))
                 self.computed_threshold = thr
                 _, th = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
         elif self.method == "tophat":
@@ -474,6 +479,7 @@ class Tracker:
                 "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
                 "detect_max_w": self.detect_max_w, "assignment": self.assignment,
                 "fit_ellipse": self.fit_ellipse, "solidity": self.solidity, "clahe": self.clahe,
+                "sensitivity": self.sensitivity,
                 "trails": self.trails, "trail_len": self.trail_len,
                 "roi": self.roi, "has_roi": self.roi is not None,
                 "has_reference": self.has_reference(),

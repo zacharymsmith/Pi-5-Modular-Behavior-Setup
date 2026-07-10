@@ -177,6 +177,15 @@
           <div style="align-self:end"><button class="sm" onclick="applyCam()">Apply</button></div>
         </div>
         <small class="hint">Resolution change reconfigures the camera — stop recording first. FPS is capped by the sensor mode, by exposure (e.g. 33000µs ⇒ ≤30 fps), and by CPU (lower res + lighter detection = higher fps).</small>
+        <div class="slider" style="margin-top:10px">
+          <label>Contrast</label><input id="camContrast" type="range" min="0.5" max="4" step="0.1" value="1" oninput="setImg()">
+          <span class="val" id="camContrastVal">1.0</span>
+        </div>
+        <div class="slider">
+          <label>Brightness</label><input id="camBright" type="range" min="-0.5" max="0.5" step="0.02" value="0" oninput="setImg()">
+          <span class="val" id="camBrightVal">0.00</span>
+        </div>
+        <small class="hint">Live image tuning — raise contrast to make low-contrast flies pop for tracking. Applies to the preview and the recording.</small>
         <div class="rowbtns" style="margin-top:10px">
           <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
@@ -344,6 +353,12 @@
         <small class="hint">set to your fly count → caps over-detection</small>
       </div>
 
+      <div class="slider" style="margin-top:8px">
+        <label>Detection sensitivity</label><input id="sens" type="range" min="0" max="100" value="50" oninput="setTrack()">
+        <span class="val" id="sensVal">50</span>
+      </div>
+      <small class="hint">Higher = catch fainter / lower-contrast flies. Lower = stricter (less noise). Watch the mask below as you drag.</small>
+
       <div class="rowbtns" style="margin-top:8px"><button class="ghost sm" onclick="toggleMask()"><span id="maskBtn">Show detection mask</span></button>
         <small class="hint">see exactly what the tracker detects</small></div>
       <img id="maskimg" src="/api/track/mask.jpg" style="display:none;width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain;margin-top:8px">
@@ -492,13 +507,13 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
   $('maxareaVal').textContent=$('maxarea').value;$('trailLenVal').textContent=$('trailLen').value;
   $('thresh').disabled=$('autoThr').checked;
   $('tophatVal').textContent=$('tophat').value;$('maxmissVal').textContent=$('maxmiss').value;
-  $('confirmVal').textContent=$('confirm').value;
+  $('confirmVal').textContent=$('confirm').value;$('sensVal').textContent=$('sens').value;
   post('/api/track',{enabled:$('trackEn').checked,method:$('method').value,
     auto_threshold:$('autoThr').checked,
     threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
     max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
     confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,detect_max_w:+$('detw').value,
-    assignment:$('assign').value,fit_ellipse:$('fitEll').checked,
+    assignment:$('assign').value,fit_ellipse:$('fitEll').checked,sensitivity:+$('sens').value,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 let hasRef=false, building=false;
 function buildBG(){if(building)return;building=true;
@@ -525,6 +540,9 @@ function capFps(){const m=MODE_FPS[$('camRes').value]||30;$('camFps').max=m;
 function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
   post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
     exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
+function setImg(){$('camContrastVal').textContent=(+$('camContrast').value).toFixed(1);
+  $('camBrightVal').textContent=(+$('camBright').value).toFixed(2);
+  post('/api/camera/config',{contrast:+$('camContrast').value,brightness:+$('camBright').value});}
 function setRecOpts(){post('/api/camera/record_opts',{record_annotated:$('recAnno').checked});}
 function setOverlay(){post('/api/camera/overlay',{enabled:$('ovEnabled').checked,title:$('ovTitle').value,
   show_datetime:$('ovDate').checked,show_elapsed:$('ovElapsed').checked,show_frame:$('ovFrame').checked,
@@ -749,6 +767,7 @@ async function refresh(){
     $('maxmiss').value=s.tracker.max_missed;$('maxmissVal').textContent=s.tracker.max_missed;
     $('confirm').value=s.tracker.confirm_frames;$('confirmVal').textContent=s.tracker.confirm_frames;
     $('expflies').value=s.tracker.expected_flies;
+    if(document.activeElement!==$('sens')&&s.tracker.sensitivity!=null){$('sens').value=s.tracker.sensitivity;$('sensVal').textContent=s.tracker.sensitivity;}
     $('detw').value=s.tracker.detect_max_w;
     $('assign').value=s.tracker.assignment;
     $('fitEll').checked=s.tracker.fit_ellipse;
@@ -762,6 +781,10 @@ async function refresh(){
     $('camAuto').checked=s.camera.controls.auto_exposure;
     $('camExp').value=s.camera.controls.exposure_us;
     $('camGain').value=s.camera.controls.gain;
+    if(document.activeElement!==$('camContrast')&&s.camera.controls.contrast!=null){
+      $('camContrast').value=s.camera.controls.contrast;$('camContrastVal').textContent=(+s.camera.controls.contrast).toFixed(1);}
+    if(document.activeElement!==$('camBright')&&s.camera.controls.brightness!=null){
+      $('camBright').value=s.camera.controls.brightness;$('camBrightVal').textContent=(+s.camera.controls.brightness).toFixed(2);}
     const ov=s.camera.overlay||{};
     $('ovEnabled').checked=ov.enabled;$('ovTitle').value=ov.title||'';
     $('ovDate').checked=ov.show_datetime;$('ovElapsed').checked=ov.show_elapsed;

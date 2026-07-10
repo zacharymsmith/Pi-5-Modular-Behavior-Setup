@@ -76,6 +76,8 @@ class Camera:
             c["AeEnable"] = False
             c["ExposureTime"] = int(self.controls["exposure_us"])
             c["AnalogueGain"] = float(self.controls["gain"])
+        c["Contrast"] = float(self.controls.get("contrast", 1.0))     # ISP image tuning —
+        c["Brightness"] = float(self.controls.get("brightness", 0.0)) # helps low-contrast flies pop
         return c
 
     def _open(self):
@@ -113,7 +115,7 @@ class Camera:
         return self.message
 
     def apply_config(self, size=None, fps=None, auto_exposure=None,
-                     exposure_us=None, gain=None) -> str | None:
+                     exposure_us=None, gain=None, contrast=None, brightness=None) -> str | None:
         """Change camera specs at runtime. Resolution/fps changes reconfigure the
         camera; exposure/gain apply live. Refused while recording (would corrupt
         the file)."""
@@ -132,6 +134,10 @@ class Camera:
             self.controls["exposure_us"] = int(exposure_us)
         if gain is not None:
             self.controls["gain"] = float(gain)
+        if contrast is not None:
+            self.controls["contrast"] = max(0.0, min(32.0, float(contrast)))
+        if brightness is not None:
+            self.controls["brightness"] = max(-1.0, min(1.0, float(brightness)))
 
         if self.hw and self._cam is not None:
             try:
