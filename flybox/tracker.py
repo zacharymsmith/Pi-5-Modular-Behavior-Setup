@@ -95,6 +95,10 @@ class Tracker:
     _clahe: object = None
     tophat_kernel: int = TRACK_TOPHAT_KERNEL   # feature size for illumination-invariant method
     _ref: object = None          # median reference image (for refsub method)
+    bg_adapt: bool = True        # self-healing reference: slowly blend the live frame into
+                                 # the reference at non-fly pixels, so lighting drift AND a
+                                 # briefly-baked-in fly can never permanently blind detection
+    bg_learn: float = 0.03       # adaptation rate per processed frame (~1-2 s to heal)
     min_area: int = TRACK_MIN_AREA
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
@@ -117,6 +121,7 @@ class Tracker:
     _trailmap: Dict[int, deque] = field(default_factory=dict)
     _mask: object = None
     _mask_shape: object = None
+    _adapt_ct: int = 0
 
     # ---- arena ROI (limit tracking to inside the dish) -----------------
     def set_arena(self, nx1, ny1, nx2, ny2, shape="ellipse"):
@@ -163,6 +168,29 @@ class Tracker:
     def has_reference(self) -> bool:
         return self._ref is not None
 
+    def update_reference(self, frame_bgr, tracks):
+        """Slowly blend the live frame into the reference at NON-fly pixels only.
+        Keeps the reference fresh against lighting/gain drift, and lets a fly that
+        was accidentally baked into the reference clear out within ~1-2 s of moving,
+        so refsub can never permanently 'lose' a fly. Detected fly pixels are protected
+        from the update so real flies are never absorbed."""
+        if not self.bg_adapt or self._ref is None or self.method != "refsub":
+            return
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        if gray.shape != self._ref.shape:
+            gray = cv2.resize(gray, (self._ref.shape[1], self._ref.shape[0]))
+        h, w = self._ref.shape
+        sx, sy = w / frame_bgr.shape[1], h / frame_bgr.shape[0]
+        prot = np.zeros((h, w), np.uint8)
+        r = max(12, int(self.tophat_kernel * sx))
+        for t in tracks:
+            cv2.circle(prot, (int(t["x"] * sx), int(t["y"] * sy)), r, 255, -1)
+        a = float(self.bg_learn)
+        ref = self._ref.astype(np.float32)
+        keep = prot == 0
+        ref[keep] = (1.0 - a) * ref[keep] + a * gray[keep].astype(np.float32)
+        self._ref = ref.astype(np.uint8)
+
     def _binarize(self, frame_bgr, scale=1.0):
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         if self.blur:
@@ -192,10 +220,18 @@ class Tracker:
                 if cm > 1:
                     gray = np.clip(gray.astype(np.float32) * (rm / cm), 0, 255).astype(np.uint8)
                 diff = cv2.absdiff(gray, ref)
-                if int(diff.max()) < 18:
-                    th = np.zeros(gray.shape, np.uint8)      # nothing changed
-                else:
-                    _, th = cv2.threshold(diff, 22, 255, cv2.THRESH_BINARY)
+                # ADAPTIVE threshold (not a fixed cut): Otsu finds the fly/background
+                # split inside the ROI, clamped to a floor/ceiling. The floor keeps
+                # faint, low-contrast flies (dark specks on bright dish) detectable —
+                # a fixed high cut was silently dropping them. ROI-restricted so the
+                # bright rim can't skew Otsu.
+                dm = m if (m is not None and int((m > 0).sum()) > 100) else None
+                dvals = diff[dm > 0] if dm is not None else diff.reshape(-1)
+                otsu, _ = cv2.threshold(dvals.reshape(-1, 1).astype(np.uint8),
+                                        0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                thr = int(min(45, max(10, otsu)))
+                self.computed_threshold = thr
+                _, th = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
         elif self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
             # black-hat isolates dark spots on a bright bg; top-hat the reverse.
@@ -377,6 +413,11 @@ class Tracker:
                                reverse=True)[:self.expected_flies]
         tracks = confirmed
         self.tracks = tracks
+        # self-heal the reference every 4th frame (protect current blobs so real flies
+        # aren't absorbed) — throttled to stay light on the Pi's real-time loop
+        self._adapt_ct = (self._adapt_ct + 1) % 4
+        if self._adapt_ct == 0:
+            self.update_reference(frame_bgr, dets)
 
         live_ids = {t["id"] for t in tracks}
         for t in tracks:
