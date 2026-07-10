@@ -37,7 +37,9 @@ class Camera:
         self.fps = CAMERA_FPS
         self.controls = {"auto_exposure": CAMERA_AUTO_EXPOSURE,
                          "exposure_us": CAMERA_EXPOSURE_US,
-                         "gain": CAMERA_GAIN}
+                         "gain": CAMERA_GAIN,
+                         "contrast": 1.0,       # ISP contrast (1.0 = neutral, >1 = punchier)
+                         "brightness": 0.0}     # ISP brightness (-1..1, 0 = neutral)
         self._cond = threading.Condition()
         self._jpeg = None
         self._frame = None
