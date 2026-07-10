@@ -1,0 +1,2 @@
+t_iso,t_s,source,channel,frequency_hz,pulse_width_ms,train_duration_s,intensity,dose_mJ_cm2,detail
+2026-07-09T16:33:08.820790,22.365,proximity,blue,20,10,1.0,1.0,,

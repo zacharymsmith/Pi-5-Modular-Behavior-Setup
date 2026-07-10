@@ -1,0 +1,80 @@
+{
+  "protocols": {
+    "red": {
+      "frequency_hz": 0.5,
+      "pulse_width_ms": 10.0,
+      "train_duration_s": 2.0,
+      "rest_s": 5.0,
+      "n_bursts": 5,
+      "channel": "red",
+      "intensity": 1.0
+    },
+    "blue": {
+      "frequency_hz": 0.5,
+      "pulse_width_ms": 10.0,
+      "train_duration_s": 2.0,
+      "rest_s": 5.0,
+      "n_bursts": 5,
+      "channel": "blue",
+      "intensity": 1.0
+    }
+  },
+  "zones": [],
+  "proximity": {
+    "enabled": true,
+    "distance_px": 37,
+    "channel": "blue"
+  },
+  "cooldown_s": 2.0,
+  "calibration": null,
+  "tracker": {
+    "method": "tophat",
+    "threshold": 60,
+    "invert": true,
+    "auto_threshold": true,
+    "min_area": 4,
+    "max_area": 4000,
+    "tophat_kernel": 25,
+    "max_missed": 12,
+    "confirm_frames": 4,
+    "expected_flies": 2,
+    "clahe": false,
+    "bgsub_var": 25,
+    "adaptive_block": 51,
+    "adaptive_C": 5,
+    "roi": {
+      "shape": "ellipse",
+      "x1": 0.22600834492350486,
+      "y1": 0.15700934579439252,
+      "x2": 0.6821974965229486,
+      "y2": 0.7700934579439253
+    },
+    "trails": false,
+    "trail_len": 30
+  },
+  "camera": {
+    "width": 1332,
+    "height": 990,
+    "fps": 120.0,
+    "overlay": {
+      "enabled": true,
+      "title": "",
+      "show_datetime": true,
+      "show_elapsed": true,
+      "show_frame": true,
+      "show_fps": true,
+      "corner": "tl"
+    },
+    "auto_exposure": false,
+    "exposure_us": 33000,
+    "gain": 4.7
+  },
+  "_sections": [
+    "stim",
+    "tracking",
+    "triggers",
+    "camera",
+    "calibration"
+  ],
+  "_name": "test_09jul2026_2"
+}

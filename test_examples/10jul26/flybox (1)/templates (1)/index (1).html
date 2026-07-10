@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlyBox Controller</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1b212d; --line:#28303f;
+    --fg:#e8ebf2; --muted:#8a93a6; --accent:#5b8cff; --green:#2fbf71;
+    --amber:#f2a13d; --red:#e5484d; --blue:#3aa0ff; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;color:var(--fg);
+       background:radial-gradient(1200px 600px at 70% -10%,#182034 0,var(--bg) 60%);min-height:100vh}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);
+         position:sticky;top:0;background:rgba(11,13,18,.85);backdrop-filter:blur(8px);z-index:5}
+  header h1{font-size:17px;margin:0}
+  .chips{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+  .chip{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
+        padding:4px 10px;border-radius:999px}
+  .chip b{color:var(--fg)}
+  .zoomctl{display:flex;align-items:center;gap:6px;margin-left:10px}
+  .zoomctl button{padding:5px 10px;font-size:14px;font-weight:700}
+  .zoomctl span{font-size:12px;color:var(--muted);min-width:40px;text-align:center}
+  main{display:block;padding:18px;max-width:1750px;margin:0 auto}
+  .camgrid{display:grid;grid-template-columns:minmax(0,2.1fr) minmax(340px,1fr);gap:18px;align-items:start}
+  @media(max-width:900px){.camgrid{grid-template-columns:1fr}}
+  .cols{column-count:2;column-gap:18px;margin-top:18px}
+  .cols>.card{break-inside:avoid;margin-bottom:18px}
+  @media(max-width:1000px){.cols{column-count:1}}
+  .previewWrap:fullscreen{width:100vw;height:100vh;aspect-ratio:auto;border-radius:0;background:#000}
+  .previewWrap:-webkit-full-screen{width:100vw;height:100vh;aspect-ratio:auto;background:#000}
+  .col{display:flex;flex-direction:column;gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .card h2{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .card .sub{color:var(--muted);font-size:12px;margin:0 0 12px}
+  .previewWrap{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:10px;overflow:hidden}
+  #preview{width:100%;height:100%;object-fit:contain;display:block}
+  #roiCanvas{position:absolute;inset:0;cursor:crosshair}
+  .rowbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+  button{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-weight:600;
+         color:var(--fg);background:var(--panel2);transition:.15s;font-size:14px}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:linear-gradient(180deg,var(--accent),#3f6fe0);border:0;color:#fff}
+  button.green{background:var(--green);border:0;color:#062a17}
+  button.red{background:var(--red);border:0;color:#fff}
+  button.ghost{background:transparent}
+  button.sm{padding:5px 9px;font-size:12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
+  input[type=number],input[type=text],input:not([type]),select{width:100%;padding:9px;background:#0e131c;
+        border:1px solid var(--line);border-radius:8px;color:var(--fg)}
+  input[disabled]{opacity:.45}
+  .inline{display:flex;gap:8px;align-items:center}
+  .inline select,.inline input{width:auto}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 12px}
+  .slider{display:flex;align-items:center;gap:12px;margin:10px 0}
+  .slider label{margin:0;width:70px;color:var(--fg)}
+  .slider input[type=range]{flex:1;accent-color:var(--accent)}
+  .slider .val{width:52px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  .switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .switch input{display:none}
+  .track{width:42px;height:24px;background:#2a3346;border-radius:999px;position:relative;transition:.2s}
+  .knob{position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s}
+  .switch input:checked+.track{background:var(--green)}
+  .switch input:checked+.track .knob{left:21px}
+  .statline{font-size:13px;color:var(--muted);margin-top:10px;min-height:18px}
+  .statline.on{color:var(--green)}
+  .statline.warn{color:var(--amber)}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:var(--muted)}
+  .kv b{color:var(--fg)}
+  .divider{height:1px;background:var(--line);margin:14px 0}
+  .drawtools{margin-top:12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .drawrow{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .drawrow:last-of-type{margin-bottom:0}
+  .drawlab{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);width:46px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:0;border-radius:0;background:transparent;padding:7px 13px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--accent);color:#fff}
+  .seg button:not(.on):hover{background:#222a38;color:var(--fg)}
+  .drawhint{font-size:12px;color:var(--muted);margin-top:2px}
+  .recbar{margin-top:10px;padding:9px 13px;border-radius:9px;background:var(--panel2);
+          border:1px solid var(--line);font-size:13px;color:var(--muted)}
+  .recbar.live{background:rgba(229,72,77,.16);border-color:var(--red);color:#ff9a9d;font-weight:700}
+  .recbar.live .dot{animation:blink 1s steps(2,start) infinite}
+  @keyframes blink{to{opacity:.25}}
+  .chk{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);cursor:pointer}
+  .chk input{width:15px;height:15px;accent-color:var(--accent)}
+  .badge{display:inline-block;width:8px;height:8px;border-radius:50%;background:#556;margin-right:6px}
+  .badge.ok{background:var(--green)} .badge.mock{background:var(--amber)}
+  .tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700}
+  .tag.red{background:rgba(229,72,77,.18);color:#ff8f92}
+  .tag.blue{background:rgba(58,160,255,.18);color:#8ccbff}
+  .zone{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  details{margin-top:6px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--panel2)}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  small.hint{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🪰 FlyBox Controller</h1>
+  <div class="chips">
+    <span class="chip" id="chipCam" title="">camera —</span>
+    <span class="chip" id="chipPca">PCA9685 —</span>
+    <span class="chip" id="chipFps">— fps</span>
+  </div>
+  <div class="zoomctl">
+    <button onclick="zoomBy(-0.1)" title="smaller">A−</button>
+    <span id="zoomLbl">100%</span>
+    <button onclick="zoomBy(0.1)" title="larger">A+</button>
+    <button onclick="zoomReset()" title="reset">⟲</button>
+  </div>
+</header>
+
+<main>
+  <section class="card cam">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <h2>Camera &amp; recording</h2>
+      <button class="ghost sm" onclick="toggleWide()">⤢ Fullscreen video</button>
+    </div>
+    <div class="camgrid">
+      <div class="previewWrap">
+        <img id="preview" src="/stream.mjpg" alt="live preview">
+        <canvas id="roiCanvas"></canvas>
+      </div>
+      <div class="camside">
+      <div class="drawtools">
+        <div class="drawrow">
+          <span class="drawlab">Draw</span>
+          <div class="seg" id="segTarget">
+            <button type="button" data-v="arena" class="on">Arena</button>
+            <button type="button" data-v="red">Red zone</button>
+            <button type="button" data-v="blue">Blue zone</button>
+          </div>
+        </div>
+        <div class="drawrow">
+          <span class="drawlab">Shape</span>
+          <div class="seg" id="segShape">
+            <button type="button" data-v="ellipse" class="on">◯ Ellipse</button>
+            <button type="button" data-v="rect">▭ Rectangle</button>
+          </div>
+          <button class="ghost sm" onclick="clearArena()">Clear arena</button>
+          <button class="ghost sm" onclick="clearZones()">Clear zones</button>
+        </div>
+        <div class="drawhint" id="drawHint">Drag on the video to draw.</div>
+        <div id="zoneList" style="margin-top:8px"><small class="hint">No zones yet.</small></div>
+      </div>
+      <div class="rowbtns">
+        <button class="green" onclick="rec(true)">● Record</button>
+        <button class="red" onclick="rec(false)">■ Stop</button>
+      </div>
+      <div id="recinfo" class="recbar">● not recording</div>
+      <label class="switch" style="margin-top:8px"><input type="checkbox" id="recAnno" onchange="setRecOpts()">
+        <span class="track"><span class="knob"></span></span> Also save an annotated copy (tracking + overlays)</label>
+      <div class="statline warn" id="camMsg"></div>
+      <div class="rowbtns"><button class="ghost sm" id="camRetry" style="display:none" onclick="retryCam()">↻ Retry camera</button></div>
+      <details>
+        <summary>Diagnostics · test without flies</summary>
+        <label class="switch" style="margin-top:8px"><input type="checkbox" id="mockEn" onchange="setMock()">
+          <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
+        <div class="rowbtns"><button class="primary sm" onclick="selfTest()">🧪 Self-test (sim flies)</button>
+          <small class="hint">mock feed + tracking + a centre zone, armed & auto-tuned</small></div>
+      </details>
+      <div class="divider"></div>
+      <h2>Fly trajectories</h2>
+      <p class="sub">Each fly's path in its own colour (matching the preview markers); lines thicken where it lingered, and the glow marks the most-visited areas.</p>
+      <img id="heat" src="/api/analytics/heatmap.jpg" style="width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain">
+      <div class="rowbtns">
+        <button class="ghost sm" onclick="resetHeat()">Reset trajectories</button>
+        <small class="hint" id="minDist">min dist —</small>
+      </div>
+      </div><!-- /camside -->
+      </div><!-- /camgrid -->
+      <details>
+        <summary>Camera setup · resolution, exposure, image, overlay</summary>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Resolution (HQ cam modes)</label><select id="camRes" onchange="capFps()">
+            <option value="640x480">640×480 · fast</option>
+            <option value="1024x768">1024×768</option>
+            <option value="1332x990">1332×990 · native (≤120 fps)</option>
+            <option value="2028x1080">2028×1080 · native (≤50 fps)</option>
+            <option value="2028x1520">2028×1520 · native (≤40 fps)</option>
+            <option value="4056x3040">4056×3040 · full (≤10 fps)</option>
+          </select></div>
+          <div><label>FPS</label><input id="camFps" type="number" value="30" min="1" max="120"></div>
+          <div style="align-self:end"><label class="switch"><input type="checkbox" id="camAuto" checked onchange="camAutoToggle()">
+            <span class="track"><span class="knob"></span></span> Auto-exp</label></div>
+          <div><label>Exposure µs</label><input id="camExp" type="number" value="8000" min="100" step="500" disabled></div>
+          <div><label>Gain</label><input id="camGain" type="number" value="1" min="1" max="16" step="0.1" disabled></div>
+          <div style="align-self:end"><button class="sm" onclick="applyCam()">Apply</button></div>
+        </div>
+        <small class="hint">Resolution change reconfigures the camera — stop recording first. FPS is capped by the sensor mode, by exposure (e.g. 33000µs ⇒ ≤30 fps), and by CPU (lower res + lighter detection = higher fps).</small>
+        <div class="slider" style="margin-top:10px">
+          <label>Contrast</label><input id="camContrast" type="range" min="0.5" max="4" step="0.1" value="1" oninput="setImg()">
+          <span class="val" id="camContrastVal">1.0</span>
+        </div>
+        <div class="slider">
+          <label>Brightness</label><input id="camBright" type="range" min="-0.5" max="0.5" step="0.02" value="0" oninput="setImg()">
+          <span class="val" id="camBrightVal">0.00</span>
+        </div>
+        <div class="slider">
+          <label>Sharpness</label><input id="camSharp" type="range" min="0" max="8" step="0.5" value="1" oninput="setImg()">
+          <span class="val" id="camSharpVal">1.0</span>
+        </div>
+        <div class="slider">
+          <label>Saturation</label><input id="camSat" type="range" min="0" max="4" step="0.1" value="1" oninput="setImg()">
+          <span class="val" id="camSatVal">1.0</span>
+        </div>
+        <small class="hint">Live image tuning — raise contrast/sharpness to make low-contrast flies pop; drop saturation to 0 for greyscale (removes the pink dish hue). Applies to preview + recording.</small>
+        <div class="rowbtns" style="margin-top:10px">
+          <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
+          <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
+        </div>
+        <div class="kv"><span>Live scene brightness (0–255)</span><b id="brightVal">—</b></div>
+        <div class="kv"><span>Focus score (turn lens to maximize)</span><b id="focusVal">—</b></div>
+        <div class="divider"></div>
+        <label class="switch"><input type="checkbox" id="ovEnabled" checked onchange="setOverlay()">
+          <span class="track"><span class="knob"></span></span> Burn info overlay into video</label>
+        <label style="margin-top:8px">Overlay title</label>
+        <input id="ovTitle" placeholder="experiment / video title" onchange="setOverlay()">
+        <div class="inline" style="gap:14px;flex-wrap:wrap;margin-top:8px">
+          <label class="chk"><input type="checkbox" id="ovDate" checked onchange="setOverlay()"> Date/time</label>
+          <label class="chk"><input type="checkbox" id="ovElapsed" checked onchange="setOverlay()"> Rec elapsed</label>
+          <label class="chk"><input type="checkbox" id="ovFrame" checked onchange="setOverlay()"> Frame #</label>
+          <label class="chk"><input type="checkbox" id="ovFps" checked onchange="setOverlay()"> FPS</label>
+        </div>
+        <div class="inline" style="gap:8px;margin-top:8px"><small class="hint">corner</small>
+          <select id="ovCorner" onchange="setOverlay()" style="width:auto;padding:6px">
+            <option value="tl">top-left</option><option value="tr">top-right</option>
+            <option value="bl">bottom-left</option><option value="br">bottom-right</option></select>
+        </div>
+        <small class="hint">Overlay is burned into the video only — tracking markers stay preview-only, so recordings remain clean for analysis.</small>
+      </details>
+    </section>
+
+  <div class="cols">
+    <section class="card">
+      <h2>Closed-loop stimulation</h2>
+      <p class="sub">Zones and proximity are evaluated every frame; red and blue fire independently.</p>
+      <label class="switch"><input type="checkbox" id="loopEn" onchange="setLoop()">
+        <span class="track"><span class="knob"></span></span> Arm closed loop</label>
+      <div class="slider" style="margin-top:12px">
+        <label>Cooldown</label><input id="cooldown" type="range" min="0" max="10" step="0.5" value="2" oninput="setLoop()">
+        <span class="val" id="cooldownVal">2 s</span>
+      </div>
+
+      <div class="divider"></div>
+      <label class="switch"><input type="checkbox" id="proxEn" onchange="setProx()">
+        <span class="track"><span class="knob"></span></span> Proximity trigger (flies within distance)</label>
+      <div class="slider" style="margin-top:10px">
+        <label>Distance</label><input id="proxDist" type="range" min="5" max="400" value="80" oninput="setProx()">
+        <span class="val" id="proxDistVal">80 px</span>
+      </div>
+      <div class="inline"><small class="hint">fires channel:</small>
+        <select id="proxChan" style="padding:6px" onchange="setProx()">
+          <option value="blue">blue</option><option value="red">red</option></select>
+      </div>
+      <div class="statline" id="proxDiag">flies: 0 · min dist: —</div>
+      <div class="inline" style="margin-top:8px"><small class="hint">calibration mm/px:</small>
+        <input id="mmpp" type="number" step="0.001" placeholder="e.g. 0.12" style="width:110px;padding:6px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
+        <button class="sm" onclick="setCalib()">Set</button>
+        <small class="hint" id="calibInfo"></small>
+      </div>
+
+      <div class="divider"></div>
+      <div class="kv"><span>red fires</span><b id="protoRed">—</b></div>
+      <div class="kv"><span>blue fires</span><b id="protoBlue">—</b></div>
+      <div class="rowbtns"><button class="sm" onclick="setTriggerProto()">Set trigger protocol from opto panel →</button></div>
+      <div class="kv" style="margin-top:8px"><span>Fires this session</span><b id="loopFires">0</b></div>
+      <div class="kv"><span>Last fire</span><b id="loopLast">—</b></div>
+    </section>
+
+    <section class="card">
+      <h2>Presets · reproducibility</h2>
+      <p class="sub">Save the whole setup (protocols, zones, proximity, tracking, camera) and reload it exactly.</p>
+      <div class="inline" style="gap:8px">
+        <select id="presetSel" style="flex:1"></select>
+        <button class="sm" onclick="loadPreset()">Load</button>
+        <button class="sm" onclick="deletePreset()">Delete</button>
+      </div>
+      <div style="margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Include when saving</div>
+      <div class="inline" style="gap:14px;flex-wrap:wrap;margin-top:5px">
+        <label class="chk"><input type="checkbox" class="psec" value="stim" checked> Stim</label>
+        <label class="chk"><input type="checkbox" class="psec" value="tracking" checked> Tracking+arena</label>
+        <label class="chk"><input type="checkbox" class="psec" value="triggers" checked> Zones/prox</label>
+        <label class="chk"><input type="checkbox" class="psec" value="camera" checked> Camera</label>
+        <label class="chk"><input type="checkbox" class="psec" value="calibration" checked> Calibration</label>
+      </div>
+      <small class="hint">Tick only what you want — e.g. Stim alone to reuse a protocol on a different arena.</small>
+      <div class="inline" style="gap:8px;margin-top:8px">
+        <input id="presetName" placeholder="new preset name" style="flex:1">
+        <button class="primary sm" onclick="savePreset()">Save current</button>
+      </div>
+      <div class="divider"></div>
+      <label>Data folder — all presets + sessions + logs go here</label>
+      <div class="inline" style="gap:8px">
+        <input id="dataRoot" placeholder="/home/pi5zms/Desktop/flybox_data" style="flex:1">
+        <button class="sm" onclick="setDataRoot()">Set</button>
+      </div>
+      <small class="hint" id="pathInfo"></small>
+    </section>
+
+    <section class="card">
+      <h2>Optogenetics protocol</h2>
+      <p class="sub">Also the source for closed-loop trigger protocols (set per channel).</p>
+      <label>Channel</label>
+      <select id="channel"></select>
+      <div class="grid3" style="margin-top:10px">
+        <div><label>Freq (Hz)</label><input id="freq" type="number" value="20" min="0"></div>
+        <div><label>Pulse (ms)</label><input id="pw" type="number" value="10" min="0"></div>
+        <div><label>Intensity</label><input id="intensity" type="number" value="1" min="0" max="1" step="0.05"></div>
+        <div><label>Burst (s)</label><input id="train" type="number" value="2" min="0"></div>
+        <div><label>Rest (s)</label><input id="rest" type="number" value="5" min="0"></div>
+        <div><label>Bursts</label><input id="reps" type="number" value="5" min="1"></div>
+      </div>
+      <div class="rowbtns">
+        <button class="primary" onclick="runOpto()">▶ Run</button>
+        <button class="red" onclick="stopOpto()">⏹ Stop</button>
+        <button class="sm" onclick="flashOpto()">⚡ Test flash</button>
+        <small class="hint" id="duty">duty —</small>
+      </div>
+      <div class="statline" id="optoStat">idle</div>
+    </section>
+
+    <section class="card">
+      <h2>Tracking</h2>
+      <label class="switch"><input type="checkbox" id="trackEn" onchange="setTrack();maybeAutoBuildRef()">
+        <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
+      <div class="rowbtns"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
+        <small class="hint" id="tuneInfo"></small></div>
+      <label style="margin-top:10px">Detection method</label>
+      <select id="method" onchange="setTrack();updateMethodUI();maybeAutoBuildRef()" style="width:100%">
+        <option value="refsub">Reference subtraction (recommended)</option>
+        <option value="tophat">Illumination-invariant</option>
+        <option value="threshold">Threshold (Otsu / manual)</option>
+      </select>
+
+      <div id="grpRefsub">
+        <div class="rowbtns" style="margin-top:8px">
+          <button class="primary sm" onclick="buildBG()">🌗 Rebuild reference</button>
+        </div>
+        <small class="hint" id="bgInfo">The reference builds automatically when you enable tracking. Rebuild it only if you change the lighting, exposure, or arena. Draw the arena tight to the dish for the cleanest results.</small>
+      </div>
+
+      <div id="grpTophat" class="slider" style="margin-top:8px">
+        <label>Feature size</label><input id="tophat" type="range" min="9" max="81" step="2" value="25" oninput="setTrack()">
+        <span class="val" id="tophatVal">25</span>
+      </div>
+
+      <div id="grpThresh">
+        <label class="switch" style="margin-top:8px"><input type="checkbox" id="autoThr" checked onchange="setTrack()">
+          <span class="track"><span class="knob"></span></span> Auto threshold (Otsu)</label>
+        <div class="slider" style="margin-top:8px">
+          <label>Thresh</label><input id="thresh" type="range" min="0" max="255" value="60" oninput="setTrack()">
+          <span class="val" id="threshVal">60</span>
+        </div>
+      </div>
+
+      <div class="inline" style="gap:8px;margin-top:10px">
+        <label style="margin:0">Expected flies (0 = any)</label>
+        <input id="expflies" type="number" min="0" max="20" value="2" style="width:70px" onchange="setTrack()">
+        <small class="hint">set to your fly count → caps over-detection</small>
+      </div>
+
+      <div class="slider" style="margin-top:8px">
+        <label>Detection sensitivity</label><input id="sens" type="range" min="0" max="100" value="50" oninput="setTrack()">
+        <span class="val" id="sensVal">50</span>
+      </div>
+      <small class="hint">Higher = catch fainter / lower-contrast flies. Lower = stricter (less noise). Watch the mask below as you drag.</small>
+
+      <label class="switch" style="margin-top:10px"><input type="checkbox" id="detStatic" onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Detect motionless flies (by appearance)</label>
+      <small class="hint">Also finds a still/sleeping/dead fly that has stopped moving — reference subtraction alone treats a motionless fly as background.</small>
+
+      <div class="rowbtns" style="margin-top:8px"><button class="ghost sm" onclick="toggleMask()"><span id="maskBtn">Show detection mask</span></button>
+        <small class="hint">see exactly what the tracker detects</small></div>
+      <img id="maskimg" src="/api/track/mask.jpg" style="display:none;width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain;margin-top:8px">
+
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:#8ab4ff;font-size:13px;user-select:none">Advanced tuning</summary>
+        <div style="margin-top:10px">
+          <div class="slider">
+            <label>Blob size min</label><input id="minarea" type="range" min="10" max="300" value="25" oninput="setTrack()">
+            <span class="val" id="minareaVal">25</span>
+          </div>
+          <div class="slider">
+            <label>Blob size max</label><input id="maxarea" type="range" min="500" max="8000" step="100" value="4000" oninput="setTrack()">
+            <span class="val" id="maxareaVal">4000</span>
+          </div>
+          <div class="slider">
+            <label>Coast frames</label><input id="maxmiss" type="range" min="0" max="45" value="12" oninput="setTrack()">
+            <span class="val" id="maxmissVal">12</span>
+          </div>
+          <div class="slider">
+            <label>Confirm frames</label><input id="confirm" type="range" min="1" max="20" value="3" oninput="setTrack()">
+            <span class="val" id="confirmVal">3</span>
+          </div>
+          <div class="inline" style="gap:8px;margin-top:8px">
+            <label style="margin:0">Track at</label>
+            <select id="detw" onchange="setTrack()" style="width:auto;padding:6px">
+              <option value="0">full resolution</option>
+              <option value="960">960 px (fast)</option>
+              <option value="800">800 px (faster)</option>
+              <option value="640">640 px (fastest)</option>
+            </select>
+          </div>
+          <div class="inline" style="gap:8px;margin-top:8px">
+            <label style="margin:0">Identity assignment</label>
+            <select id="assign" onchange="setTrack()" style="width:auto;padding:6px">
+              <option value="greedy">Greedy (fast)</option>
+              <option value="hungarian">Hungarian (optimal)</option>
+            </select>
+          </div>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="fitEll" onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Fit body ellipse (orientation + length)</label>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="invert" checked onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Dark subject on light background</label>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="clahe" onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Boost contrast (CLAHE)</label>
+          <label class="switch" style="margin-top:8px"><input type="checkbox" id="trailsEn" onchange="setTrack()">
+            <span class="track"><span class="knob"></span></span> Motion trails overlay</label>
+          <div class="slider"><label>Trail len</label>
+            <input id="trailLen" type="range" min="5" max="120" value="30" oninput="setTrack()">
+            <span class="val" id="trailLenVal">30</span></div>
+        </div>
+      </details>
+      <div class="kv" style="margin-top:12px"><span>Currently tracked</span><b id="trackCount">0</b></div>
+    </section>
+
+    <section class="card">
+      <h2>Experiment session</h2>
+      <p class="sub">Records video + events.csv + tracks.csv + config.json into one folder.</p>
+      <label>Save location (blank = default recordings/)</label>
+      <input id="sessDirIn" placeholder="/home/pi5zms/Desktop/data">
+      <div class="grid2" style="margin-top:8px">
+        <div><label>Experimenter</label><input id="sessExp" placeholder="name"></div>
+        <div><label>Genotype / line</label><input id="sessGeno" placeholder="e.g. CS>Chrimson"></div>
+      </div>
+      <label style="margin-top:8px">Notes</label>
+      <input id="sessNotes" placeholder="conditions, temperature, etc.">
+      <label class="chk" style="margin-top:10px"><input type="checkbox" id="sessArm" checked> Arm closed loop when I start</label>
+      <div class="inline" style="gap:8px;margin-top:8px">
+        <input id="sessName" placeholder="session name" style="flex:1">
+        <button class="green sm" onclick="sessionStart()">▶ Start</button>
+        <button class="red sm" onclick="sessionStop()">■ Stop</button>
+      </div>
+      <small class="hint">Start records video + events.csv + tracks.csv together (and arms the loop if ticked).</small>
+      <div class="kv" style="margin-top:10px"><span>Status</span><b id="sessStat">idle</b></div>
+      <div class="kv"><span>Events / track rows</span><b id="sessCounts">0 / 0</b></div>
+      <div class="kv"><span>Folder</span><b id="sessDir" style="font-size:11px">—</b></div>
+    </section>
+
+    <section class="card">
+      <h2>Scheduler · timed plan</h2>
+      <details>
+        <summary>Build an automated timed phase plan</summary>
+      <p class="sub" style="margin-top:10px">Runs a phase list automatically with recording + logging.</p>
+      <div class="grid3">
+        <div><label>Phase</label><input id="phName" value="baseline"></div>
+        <div><label>Duration s</label><input id="phDur" type="number" value="60"></div>
+        <div><label>Action</label><select id="phAct" onchange="phActToggle()">
+          <option value="none">none</option><option value="stim">stim</option><option value="light">light</option></select></div>
+        <div id="phChanWrap" style="display:none"><label>Channel</label><select id="phChan"><option value="red">red</option><option value="blue">blue</option></select></div>
+        <div id="phLightWrap" style="display:none"><label>Light</label><select id="phLight"><option value="white">white</option><option value="ir">ir</option></select></div>
+        <div id="phLevelWrap" style="display:none"><label>Level</label><input id="phLevel" type="number" value="1" min="0" max="1" step="0.1"></div>
+      </div>
+      <div class="rowbtns">
+        <button class="sm" onclick="addPhase()">+ Add phase</button>
+        <button class="primary sm" onclick="runPlan()">▶ Run plan</button>
+        <button class="red sm" onclick="stopPlan()">⏹ Stop</button>
+        <button class="ghost sm" onclick="clearPhases()">Clear</button>
+      </div>
+      <div id="phaseList" style="margin-top:6px"><small class="hint">No phases.</small></div>
+      <div class="statline" id="schedStat">idle</div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Illumination</h2>
+      <div id="lights"></div>
+      <div class="rowbtns"><button class="ghost" onclick="lightsOff()">All lights off</button></div>
+
+      <details>
+        <summary>Advanced · channel discovery</summary>
+        <p class="sub" style="margin-top:10px">Toggle a raw PCA9685 channel to confirm what it drives, then update <code>config.py</code>.</p>
+        <div class="inline">
+          <span class="hint">ch</span><input id="rawch" type="number" value="0" min="0" max="15" style="width:80px">
+          <button class="ghost sm" onclick="raw(1)">On</button>
+          <button class="ghost sm" onclick="raw(0)">Off</button>
+        </div>
+      </details>
+    </section>
+  </div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},
+                          body:b?JSON.stringify(b):null}).then(r=>r.json());
+
+// ---- UI zoom (persists across restarts; great for large Pi Connect displays) ----
+let uiZoom=parseFloat(localStorage.getItem('flyzoom')||'1')||1;
+function applyZoom(){document.body.style.zoom=uiZoom;localStorage.setItem('flyzoom',uiZoom);
+  const l=$('zoomLbl');if(l)l.textContent=Math.round(uiZoom*100)+'%';
+  setTimeout(()=>{try{fit();}catch(e){}},60);}
+function zoomBy(d){uiZoom=Math.min(2.5,Math.max(0.6,Math.round((uiZoom+d)*10)/10));applyZoom();}
+function zoomReset(){uiZoom=1;applyZoom();}
+applyZoom();
+
+// opto
+function updateDuty(){const f=+$('freq').value,pw=+$('pw').value;const d=f>0?(pw/(1000/f)*100):100;
+  $('duty').textContent='duty '+d.toFixed(0)+'%'+(d>100?' ⚠ pulse>period':'');}
+['freq','pw'].forEach(id=>$(id).addEventListener('input',updateDuty));
+function protoObj(){return{frequency_hz:+$('freq').value,pulse_width_ms:+$('pw').value,
+  train_duration_s:+$('train').value,rest_s:+$('rest').value,n_bursts:+$('reps').value,
+  channel:$('channel').value,intensity:+$('intensity').value};}
+async function runOpto(){const r=await post('/api/opto/run',protoObj());if(!r.ok)$('optoStat').textContent='⚠ '+r.error;}
+function stopOpto(){post('/api/opto/stop');}
+function flashOpto(){post('/api/opto/flash',{channel:$('channel').value,intensity:+$('intensity').value,seconds:0.4});}
+
+// tracking
+function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
+  $('maxareaVal').textContent=$('maxarea').value;$('trailLenVal').textContent=$('trailLen').value;
+  $('thresh').disabled=$('autoThr').checked;
+  $('tophatVal').textContent=$('tophat').value;$('maxmissVal').textContent=$('maxmiss').value;
+  $('confirmVal').textContent=$('confirm').value;$('sensVal').textContent=$('sens').value;
+  post('/api/track',{enabled:$('trackEn').checked,method:$('method').value,
+    auto_threshold:$('autoThr').checked,
+    threshold:+$('thresh').value,invert:$('invert').checked,min_area:+$('minarea').value,
+    max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
+    confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,detect_max_w:+$('detw').value,
+    assignment:$('assign').value,fit_ellipse:$('fitEll').checked,sensitivity:+$('sens').value,
+    detect_static:$('detStatic').checked,
+    clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
+let hasRef=false, building=false;
+function buildBG(){if(building)return;building=true;
+  $('bgInfo').textContent='building reference (~3 s — let the flies move around)…';
+  post('/api/track/build_bg',{seconds:3}).then(r=>{building=false;
+    if(r.ok){hasRef=true;$('bgInfo').textContent=`reference built from ${r.n_frames} frames ✓`;}
+    else{$('bgInfo').textContent=r.error||'failed';}
+    built=false;refresh();});}
+// auto-build the reference the moment tracking is enabled with refsub (no manual step)
+function maybeAutoBuildRef(){if($('trackEn').checked&&$('method').value==='refsub'&&!hasRef&&!building)buildBG();}
+let maskShown=false;
+function toggleMask(){maskShown=!maskShown;$('maskimg').style.display=maskShown?'block':'none';
+  $('maskBtn').textContent=maskShown?'Hide detection mask':'Show detection mask';}
+function autoTune(){post('/api/track/autotune').then(r=>{
+  if(!r.ok){$('tuneInfo').textContent=r.error;return;}
+  $('tuneInfo').textContent=`thr ${r.threshold}, ${r.invert?'dark':'light'} subject, found ${r.detected}`;
+  built=false;refresh();});}
+
+// camera options
+function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('camGain').disabled=a;}
+const MODE_FPS={"640x480":50,"1024x768":40,"1332x990":120,"2028x1080":50,"2028x1520":40,"4056x3040":10};
+function capFps(){const m=MODE_FPS[$('camRes').value]||30;$('camFps').max=m;
+  if(+$('camFps').value>m)$('camFps').value=m;}
+function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
+  post('/api/camera/config',{width:w,height:h,fps:+$('camFps').value,auto_exposure:$('camAuto').checked,
+    exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
+function setImg(){$('camContrastVal').textContent=(+$('camContrast').value).toFixed(1);
+  $('camBrightVal').textContent=(+$('camBright').value).toFixed(2);
+  $('camSharpVal').textContent=(+$('camSharp').value).toFixed(1);
+  $('camSatVal').textContent=(+$('camSat').value).toFixed(1);
+  post('/api/camera/config',{contrast:+$('camContrast').value,brightness:+$('camBright').value,
+    sharpness:+$('camSharp').value,saturation:+$('camSat').value});}
+function setRecOpts(){post('/api/camera/record_opts',{record_annotated:$('recAnno').checked});}
+function setOverlay(){post('/api/camera/overlay',{enabled:$('ovEnabled').checked,title:$('ovTitle').value,
+  show_datetime:$('ovDate').checked,show_elapsed:$('ovElapsed').checked,show_frame:$('ovFrame').checked,
+  show_fps:$('ovFps').checked,corner:$('ovCorner').value});}
+function autoExpose(){$('expInfo').textContent='metering the arena…';
+  post('/api/camera/autoexpose').then(r=>{
+    if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
+    $('expInfo').textContent=`locked ${r.exposure_us}µs · gain ${r.gain} · arena≈${r.measured}`+(r.metered_arena?'':' (whole frame — set an arena ROI)');
+    built=false;refresh();});}
+
+// presets
+async function refreshPresets(){const r=await fetch('/api/presets').then(x=>x.json());
+  const sel=$('presetSel'),cur=sel.value;
+  sel.innerHTML=(r.presets.length?r.presets:['']).map(p=>`<option value="${p}">${p||'(none saved)'}</option>`).join('');
+  if(cur)sel.value=cur;}
+function tstamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;}
+function presetNames(){return [...$('presetSel').options].map(o=>o.value).filter(Boolean);}
+function savePreset(){let n=$('presetName').value.trim();
+  const secs=[...document.querySelectorAll('.psec:checked')].map(c=>c.value);
+  if(!secs.length){alert('Tick at least one section to save');return;}
+  if(!n)n='preset_'+tstamp();                              // auto-name with date/time if blank
+  if(presetNames().includes(n)&&!confirm(`A preset named "${n}" already exists.\nOverwrite it?`))return;
+  post('/api/presets/save',{name:n,sections:secs}).then(()=>{$('presetName').value='';refreshPresets();});}
+function loadPreset(){const n=$('presetSel').value;if(!n)return;
+  post('/api/presets/load',{name:n}).then(()=>{built=false;refresh();});}
+function deletePreset(){const n=$('presetSel').value;if(!n)return;
+  post('/api/presets/delete',{name:n}).then(refreshPresets);}
+function setDataRoot(){post('/api/datadir',{path:$('dataRoot').value||null}).then(r=>{
+  if(!r.ok){alert(r.error||'failed');return;} refreshPresets();});}
+
+// calibration
+function setCalib(){const v=parseFloat($('mmpp').value);
+  post('/api/calibration',{mm_per_px:isNaN(v)?null:v});}
+
+// analytics
+function resetHeat(){post('/api/analytics/reset');}
+
+// sessions
+function sessionStart(){let name=$('sessName').value.trim();
+  if(!name){  // auto-name from metadata + timestamp so nothing is ever unlabelled
+    const parts=[$('sessExp').value.trim(),$('sessGeno').value.trim()].filter(Boolean);
+    name=(parts.join('_')||'session')+'_'+tstamp();}
+  post('/api/session/start',{name,save_dir:$('sessDirIn').value||null,experimenter:$('sessExp').value||null,
+  genotype:$('sessGeno').value||null,notes:$('sessNotes').value||null}).then(r=>{
+    if(!r.ok){alert(r.error);return;}
+    if($('sessArm').checked){$('loopEn').checked=true;setLoop();}});}
+function sessionStop(){post('/api/session/stop');
+  if($('sessArm').checked){$('loopEn').checked=false;setLoop();}}
+
+// scheduler phase builder
+let phases=[];
+function phActToggle(){const a=$('phAct').value;
+  $('phChanWrap').style.display=a==='stim'?'block':'none';
+  $('phLightWrap').style.display=a==='light'?'block':'none';
+  $('phLevelWrap').style.display=a==='light'?'block':'none';}
+function renderPhases(){$('phaseList').innerHTML=phases.length?phases.map((p,i)=>
+  `<div class="zone"><span>${i+1}. ${p.name} · ${p.duration_s}s · ${p.action}${p.channel?' '+p.channel:''}${p.light?' '+p.light+'@'+p.level:''}</span>
+   <button class="ghost sm" onclick="delPhase(${i})">✕</button></div>`).join(''):'<small class="hint">No phases.</small>';}
+function addPhase(){const a=$('phAct').value;
+  phases.push({name:$('phName').value||'phase',duration_s:+$('phDur').value,action:a,
+    channel:a==='stim'?$('phChan').value:null,
+    light:a==='light'?$('phLight').value:null,level:a==='light'?+$('phLevel').value:null});
+  renderPhases();}
+function delPhase(i){phases.splice(i,1);renderPhases();}
+function clearPhases(){phases=[];renderPhases();}
+function runPlan(){if(!phases.length){alert('Add phases first');return;}
+  post('/api/scheduler/run',{name:$('sessName').value||'plan',phases}).then(r=>{if(!r.ok)alert(r.error);});}
+function stopPlan(){post('/api/scheduler/stop');}
+
+// illumination
+function setLight(n,v){post('/api/light',{name:n,level:v});}
+function lightsOff(){post('/api/light/off');}
+function raw(on){post('/api/light/raw',{channel:+$('rawch').value,level:on});}
+
+// closed loop
+function setLoop(){$('cooldownVal').textContent=$('cooldown').value+' s';
+  post('/api/loop',{enabled:$('loopEn').checked,cooldown_s:+$('cooldown').value});}
+function setProx(){$('proxDistVal').textContent=$('proxDist').value+' px';
+  post('/api/loop/proximity',{enabled:$('proxEn').checked,distance_px:+$('proxDist').value,channel:$('proxChan').value});}
+function clearZones(){post('/api/loop/zones/clear').then(refresh);}
+function removeZone(id){post('/api/loop/zone/remove',{id}).then(refresh);}
+function setTriggerProto(){post('/api/loop/protocol',protoObj()).then(refresh);}
+function rec(on){post(on?'/api/record/start':'/api/record/stop');}
+function fmtT(s){s=s||0;const m=Math.floor(s/60),x=s%60;return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
+function updateRecBar(cam){
+  if(cam.recording){
+    $('recinfo').innerHTML=`<span class="dot" style="color:#e5484d">●</span> REC ${fmtT(cam.rec_elapsed)} · ${cam.record_fps||cam.fps} fps · ${(cam.path||'').split('/').pop()}${cam.annotated?' (+annotated)':''}`;
+    $('recinfo').className='recbar live';
+  } else {
+    $('recinfo').textContent='● not recording'; $('recinfo').className='recbar';
+  }}
+function retryCam(){post('/api/camera/retry').then(refresh);}
+function setMock(){post('/api/camera/mock',{enabled:$('mockEn').checked});}
+function selfTest(){post('/api/selftest').then(r=>{
+  if(r&&r.tuned)$('tuneInfo').textContent=`self-test: found ${r.tuned.detected} sim flies`;
+  built=false;refresh();});}
+
+// ---- drawing toolbar + accurate ROI/zone drawing ----
+let drawTarget='arena', drawShape='ellipse';
+function initSeg(id,cb){const seg=$(id);seg.querySelectorAll('button').forEach(b=>{
+  b.addEventListener('click',()=>{seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');cb(b.dataset.v);});});}
+initSeg('segTarget',v=>{drawTarget=v;updateHint();});
+initSeg('segShape',v=>{drawShape=v;updateHint();});
+function updateHint(){
+  const t=drawTarget==='arena'?'arena mask':drawTarget+' zone';
+  const how=drawShape==='ellipse'?'click the centre, drag outward to the edge':'drag a box corner-to-corner';
+  $('drawHint').textContent=`${t} — ${how}.`;}
+function drawColor(){return drawTarget==='arena'?'#ffff00':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
+
+const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
+function fit(){const r=$('preview').getBoundingClientRect();cv.width=Math.round(r.width);cv.height=Math.round(r.height);}
+window.addEventListener('resize',fit);
+function pos(e){const r=cv.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height};}
+function rubber(a,b){ctx.clearRect(0,0,cv.width,cv.height);ctx.strokeStyle=drawColor();ctx.lineWidth=2;
+  if(drawShape==='ellipse'){                       // centre-anchored: a = centre (fixed)
+    ctx.beginPath();ctx.ellipse(a.x,a.y,Math.abs(b.x-a.x),Math.abs(b.y-a.y),0,0,7);ctx.stroke();
+    ctx.fillStyle=drawColor();ctx.beginPath();ctx.arc(a.x,a.y,2.5,0,7);ctx.fill();}
+  else ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));}
+cv.addEventListener('mousedown',e=>{fit();drag=pos(e);});
+cv.addEventListener('mousemove',e=>{if(drag)rubber(drag,pos(e));});
+cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2;
+  if(drawShape==='ellipse'){const rx=Math.abs(p.x-drag.x),ry=Math.abs(p.y-drag.y);
+    x1=drag.x-rx;y1=drag.y-ry;x2=drag.x+rx;y2=drag.y+ry;}   // box from centre+radius
+  else {x1=drag.x;y1=drag.y;x2=p.x;y2=p.y;}
+  drag=null;setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
+  const nx1=x1/cv.width,ny1=y1/cv.height,nx2=x2/cv.width,ny2=y2/cv.height;
+  if(Math.abs(nx2-nx1)<0.02||Math.abs(ny2-ny1)<0.02)return;
+  if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
+  else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
+function clearArena(){post('/api/track/roi/clear').then(refresh);}
+function toggleWide(){const pw=document.querySelector('.previewWrap');
+  const fs=document.fullscreenElement||document.webkitFullscreenElement;
+  if(!fs){ (pw.requestFullscreen||pw.webkitRequestFullscreen).call(pw); }
+  else { (document.exitFullscreen||document.webkitExitFullscreen).call(document); }}
+document.addEventListener('fullscreenchange',()=>setTimeout(fit,120));
+document.addEventListener('webkitfullscreenchange',()=>setTimeout(fit,120));
+function updateMethodUI(){const m=$('method').value;
+  $('grpRefsub').style.display=(m==='refsub')?'':'none';
+  $('grpTophat').style.display=(m==='tophat')?'':'none';
+  $('grpThresh').style.display=(m==='threshold')?'':'none';}
+
+// status
+let built=false, lastCamKey='';
+function proto1(p){return `${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.train_duration_s}s`;}
+async function refresh(){
+  let s;try{s=await fetch('/api/status').then(r=>r.json());}catch(e){return;}
+  const badge=ok=>`<span class="badge ${ok?'ok':'mock'}"></span>`;
+  const camLabel=s.camera.mock?'mock (test)':(s.camera.hw?'live':'mock');
+  $('chipCam').innerHTML=badge(s.camera.hw)+'camera <b>'+camLabel+'</b>';
+  $('chipCam').title=s.camera.message||'';
+  $('chipPca').innerHTML=badge(s.opto.hw)+'PCA9685 <b>'+(s.opto.hw?'linked':'mock')+'</b>';
+  $('chipFps').innerHTML='<b>'+(s.camera.fps||0)+'</b> fps';
+  // only warn / offer retry when there's NO real camera (not for the test toggle)
+  $('camMsg').textContent=s.camera.camera_present?'':s.camera.message;
+  $('camRetry').style.display=s.camera.camera_present?'none':'inline-block';
+  // match the preview box to the real video aspect so drawing clicks are exact
+  const pw=document.querySelector('.previewWrap'), cs=s.camera.size;
+  if(cs&&cs[0]&&cs[1]){const key=cs[0]+'x'+cs[1];
+    if(key!==lastCamKey){lastCamKey=key;pw.style.aspectRatio=cs[0]+' / '+cs[1];setTimeout(fit,60);}}
+  $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
+  $('optoStat').className='statline'+(s.opto.running?' on':'');
+  $('trackCount').textContent=s.tracker.count;
+  hasRef=!!s.tracker.has_reference;
+  $('loopFires').textContent=s.loop.fires;
+  $('loopLast').textContent=s.loop.last_event;
+  $('protoRed').textContent=proto1(s.loop.protocols.red);
+  $('protoBlue').textContent=proto1(s.loop.protocols.blue);
+  // proximity diagnostics, calibration, analytics
+  const an=s.loop.analytics, mmpp=s.loop.mm_per_px;
+  const dtxt=an.min_dist_px!=null?(an.min_dist_px+'px'+(an.min_dist_mm!=null?' ('+an.min_dist_mm+'mm)':'')):'—';
+  $('proxDiag').textContent=`flies: ${s.tracker.count} · min dist: ${dtxt}`;
+  $('minDist').textContent='min dist '+dtxt;
+  $('calibInfo').textContent=mmpp?('≈ '+(s.loop.proximity.distance_mm||'?')+' mm trigger'):'(uncalibrated — px)';
+  // session
+  const ss=s.session;
+  $('sessStat').textContent=ss.running?('● recording '+ss.elapsed_s+'s'):'idle';
+  $('sessStat').className='';
+  $('sessCounts').textContent=ss.n_events+' / '+ss.n_track_rows;
+  $('sessDir').textContent=ss.dir||'—';
+  // scheduler
+  const sc=s.scheduler;
+  $('schedStat').textContent=sc.running?('● '+sc.phase+' ('+sc.remaining_s+'s left)'):'idle';
+  $('schedStat').className='statline'+(sc.running?' on':'');
+  if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
+  if(s.camera.brightness!=null) $('brightVal').textContent=s.camera.brightness;
+  if(s.camera.focus!=null) $('focusVal').textContent=s.camera.focus;
+  updateRecBar(s.camera);
+  // keep illumination sliders showing the ACTUAL light levels (unless being dragged)
+  document.querySelectorAll('#lights input[data-light]').forEach(inp=>{
+    if(document.activeElement!==inp){const v=s.lights[inp.dataset.light]; if(v!=null) inp.value=v;}});
+  if(maskShown) $('maskimg').src='/api/track/mask.jpg?t='+Date.now();
+  // refresh heatmap (cache-bust)
+  $('heat').src='/api/analytics/heatmap.jpg?t='+Date.now();
+  // zones list
+  const zl=$('zoneList');
+  zl.innerHTML=s.loop.zones.length?s.loop.zones.map(z=>
+    `<div class="zone"><span><span class="tag ${z.channel}">${z.channel}</span> ${z.shape||'rect'} #${z.id}</span>
+     <button class="ghost sm" onclick="removeZone(${z.id})">remove</button></div>`).join(''):
+    '<small class="hint">No zones yet — use the Draw tools above.</small>';
+  if(!built){
+    $('channel').innerHTML=s.opto_channels.map(c=>`<option>${c}</option>`).join('');
+    $('lights').innerHTML=s.light_names.map(n=>`
+      <div class="slider"><label>${n}</label>
+      <input type="range" data-light="${n}" min="0" max="1" step="0.01" value="0" oninput="setLight('${n}',this.value)"></div>`).join('');
+    // reflect server proximity/cooldown once
+    $('cooldown').value=s.loop.cooldown_s;$('cooldownVal').textContent=s.loop.cooldown_s+' s';
+    $('proxEn').checked=s.loop.proximity.enabled;
+    $('proxDist').value=s.loop.proximity.distance_px;$('proxDistVal').textContent=s.loop.proximity.distance_px+' px';
+    $('proxChan').value=s.loop.proximity.channel;
+    $('mockEn').checked=s.camera.mock;
+    // tracking
+    $('trackEn').checked=s.tracker.enabled;
+    $('method').value=s.tracker.method;updateMethodUI();
+    $('autoThr').checked=s.tracker.auto_threshold;
+    $('thresh').value=s.tracker.threshold;$('threshVal').textContent=s.tracker.threshold;$('thresh').disabled=s.tracker.auto_threshold;
+    $('minarea').value=s.tracker.min_area;$('minareaVal').textContent=s.tracker.min_area;
+    $('maxarea').value=s.tracker.max_area;$('maxareaVal').textContent=s.tracker.max_area;
+    $('tophat').value=s.tracker.tophat_kernel;$('tophatVal').textContent=s.tracker.tophat_kernel;
+    $('maxmiss').value=s.tracker.max_missed;$('maxmissVal').textContent=s.tracker.max_missed;
+    $('confirm').value=s.tracker.confirm_frames;$('confirmVal').textContent=s.tracker.confirm_frames;
+    $('expflies').value=s.tracker.expected_flies;
+    if(document.activeElement!==$('sens')&&s.tracker.sensitivity!=null){$('sens').value=s.tracker.sensitivity;$('sensVal').textContent=s.tracker.sensitivity;}
+    if(s.tracker.detect_static!=null)$('detStatic').checked=s.tracker.detect_static;
+    $('detw').value=s.tracker.detect_max_w;
+    $('assign').value=s.tracker.assignment;
+    $('fitEll').checked=s.tracker.fit_ellipse;
+    $('clahe').checked=s.tracker.clahe;
+    $('invert').checked=s.tracker.invert;
+    $('trailsEn').checked=s.tracker.trails;
+    $('trailLen').value=s.tracker.trail_len;$('trailLenVal').textContent=s.tracker.trail_len;
+    // camera options
+    $('camRes').value=s.camera.size[0]+'x'+s.camera.size[1];
+    $('camFps').value=s.camera.target_fps;
+    $('camAuto').checked=s.camera.controls.auto_exposure;
+    $('camExp').value=s.camera.controls.exposure_us;
+    $('camGain').value=s.camera.controls.gain;
+    if(document.activeElement!==$('camContrast')&&s.camera.controls.contrast!=null){
+      $('camContrast').value=s.camera.controls.contrast;$('camContrastVal').textContent=(+s.camera.controls.contrast).toFixed(1);}
+    if(document.activeElement!==$('camBright')&&s.camera.controls.brightness!=null){
+      $('camBright').value=s.camera.controls.brightness;$('camBrightVal').textContent=(+s.camera.controls.brightness).toFixed(2);}
+    if(document.activeElement!==$('camSharp')&&s.camera.controls.sharpness!=null){
+      $('camSharp').value=s.camera.controls.sharpness;$('camSharpVal').textContent=(+s.camera.controls.sharpness).toFixed(1);}
+    if(document.activeElement!==$('camSat')&&s.camera.controls.saturation!=null){
+      $('camSat').value=s.camera.controls.saturation;$('camSatVal').textContent=(+s.camera.controls.saturation).toFixed(1);}
+    const ov=s.camera.overlay||{};
+    $('ovEnabled').checked=ov.enabled;$('ovTitle').value=ov.title||'';
+    $('ovDate').checked=ov.show_datetime;$('ovElapsed').checked=ov.show_elapsed;
+    $('ovFrame').checked=ov.show_frame;$('ovFps').checked=ov.show_fps;$('ovCorner').value=ov.corner||'tl';
+    $('recAnno').checked=s.camera.record_annotated;
+    $('mmpp').value=s.loop.mm_per_px||'';
+    camAutoToggle();phActToggle();
+    fit();built=true;
+  }
+}
+updateDuty();updateHint();refresh();refreshPresets();setInterval(refresh,1200);
+window.addEventListener('load',fit);
+</script>
+</body>
+</html>

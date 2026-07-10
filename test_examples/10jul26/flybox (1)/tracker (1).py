@@ -109,19 +109,13 @@ class Tracker:
     sensitivity: int = 50                      # 0-100: higher = catch fainter flies (lower diff
                                                # threshold), lower = stricter (less noise). 50 = default
     solidity: float = 0.4                      # reject thin/edge blobs (area/hull); 0 = off
-    assignment: str = "greedy"                 # "greedy" (best identity COVERAGE — keeps the N
-                                               # real flies labelled) | "hungarian" (0 swaps but
-                                               # fragments more; pick it if silent swaps are worse
-                                               # for you than a fly occasionally getting a new id)
+    assignment: str = "greedy"                 # "greedy" | "hungarian" (optimal)
     fit_ellipse: bool = False                  # fit body ellipse (orientation + axes)
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
     confirm_frames: int = TRACK_CONFIRM_FRAMES # new blob must persist this long to become a track
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
     reacquire_frames: int = 250                # remember a lost fly's last position this long;
                                                # a new blob near it reclaims the OLD id (fewer swaps)
-    predict: float = 1.2                       # frames of motion to extrapolate when matching —
-                                               # carries identity through crossings without overshoot
-    vel_smooth: float = 0.6                    # velocity estimate responsiveness (0..1)
     detect_max_w: int = TRACK_DETECT_MAX_W     # downscale detection to this width (0 = full res)
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
@@ -379,19 +373,12 @@ class Tracker:
         if not prev or not dets:
             return matches
         d2 = self.match_dist ** 2
-        def _cost(dd, p):
-            # cost = distance to whichever is closer: the velocity-PREDICTED position
-            # (separates flies at a crossing) or the LAST actual position (catches a
-            # fly that turned, so prediction overshoot doesn't fragment its id)
-            cp = (dd["x"] - p["px"]) ** 2 + (dd["y"] - p["py"]) ** 2
-            cc = (dd["x"] - p["x"]) ** 2 + (dd["y"] - p["y"]) ** 2
-            return cp if cp < cc else cc
         if self.assignment == "hungarian":
             big = d2 * 1000 + 1
             cost = np.empty((len(prev), len(dets)), dtype=float)
             for i, p in enumerate(prev):
                 for j, dd in enumerate(dets):
-                    c = _cost(dd, p)
+                    c = (dd["x"] - p["px"]) ** 2 + (dd["y"] - p["py"]) ** 2
                     cost[i, j] = c if c <= d2 else big     # forbid too-far links
             for i, j in _hungarian(cost):
                 if cost[i, j] <= d2:
@@ -403,7 +390,7 @@ class Tracker:
                 for p in prev:
                     if p["id"] in used:
                         continue
-                    c = _cost(dd, p)
+                    c = (dd["x"] - p["px"]) ** 2 + (dd["y"] - p["py"]) ** 2
                     if c < bestd:
                         best, bestd = p, c
                 if best is not None:
@@ -413,12 +400,12 @@ class Tracker:
 
     def _assign(self, dets):
         prev = list(self._prev)
-        for p in prev:  # predict where each fly should be this frame (momentum carries
-            p["px"] = p["x"] + self.predict * p.get("vx", 0.0)   # identity through a crossing)
-            p["py"] = p["y"] + self.predict * p.get("vy", 0.0)
+        for p in prev:  # predict where each fly should be this frame
+            p["px"] = p["x"] + p.get("vx", 0.0)
+            p["py"] = p["y"] + p.get("vy", 0.0)
         matches = self._match(prev, dets)
         tracks, matched_ids = [], set()
-        a = self.vel_smooth  # velocity smoothing (higher = more responsive to turns)
+        a = 0.5  # velocity smoothing
         for j, dd in enumerate(dets):
             x, y = int(round(dd["x"])), int(round(dd["y"]))
             ell = {"angle": dd.get("angle"), "major": dd.get("major", 0.0),

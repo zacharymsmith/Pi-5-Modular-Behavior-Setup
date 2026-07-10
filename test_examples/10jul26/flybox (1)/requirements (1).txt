@@ -1,0 +1,18 @@
+# Web service
+fastapi
+uvicorn[standard]
+pydantic
+
+# Hardware (Pi 5) — installed on the Pi; safe to omit when developing off-Pi
+adafruit-circuitpython-pca9685   # PCA9685 (strips + opto)
+adafruit-blinka            # board/busio backing for CircuitPython libs on the Pi
+
+# picamera2 is NOT pip-installed here — install via apt on the Pi:
+#   sudo apt install -y python3-picamera2
+# and run uvicorn with the system Python so it can import picamera2.
+#
+# IMPORTANT: do NOT pip-install numpy or opencv. picamera2 (apt) is compiled
+# against the SYSTEM numpy; a pip numpy causes a binary/ABI clash and picamera2
+# fails to import ("numpy.dtype size changed"). Install these via apt instead:
+#   sudo apt install -y python3-numpy python3-opencv   # numpy + OpenCV (Phase 4)
+# setup.sh does this for you.
