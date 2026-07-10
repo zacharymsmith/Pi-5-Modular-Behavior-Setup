@@ -497,17 +497,11 @@ def _gather_config() -> dict:
                       "channel": loop.proximity["channel"]},
         "cooldown_s": loop.cooldown_s,
         "calibration": loop.mm_per_px,
-        "tracker": {"method": tracker.method, "threshold": tracker.threshold,
-                    "invert": tracker.invert, "auto_threshold": tracker.auto_threshold,
-                    "min_area": tracker.min_area, "max_area": tracker.max_area,
-                    "tophat_kernel": tracker.tophat_kernel, "max_missed": tracker.max_missed,
-                    "confirm_frames": tracker.confirm_frames, "expected_flies": tracker.expected_flies,
-                    "detect_max_w": tracker.detect_max_w, "assignment": tracker.assignment,
-                    "fit_ellipse": tracker.fit_ellipse, "clahe": tracker.clahe,
-                    "solidity": tracker.solidity, "sensitivity": tracker.sensitivity,
-                    "detect_static": tracker.detect_static,
-                    "roi": tracker.roi,
-                    "trails": tracker.trails, "trail_len": tracker.trail_len},
+        # full tracker config (all detection params, sensitivity, auto/detect-static,
+        # arena ROI) — captured automatically so nothing is ever missed
+        "tracker": tracker.config_dict(),
+        # full camera config — resolution, fps, overlay, and ALL image controls
+        # (auto-exposure, exposure, gain, contrast, brightness, sharpness, saturation)
         "camera": {"width": s["size"][0], "height": s["size"][1],
                    "fps": s["target_fps"], "overlay": s["overlay"], **s["controls"]},
     }
@@ -528,18 +522,8 @@ def _apply_config(d: dict):
     if "calibration" in d:
         loop.set_calibration(d["calibration"])
     tk = d.get("tracker", {})
-    for k in ("method", "auto_threshold", "threshold", "invert", "min_area", "max_area",
-              "tophat_kernel", "max_missed", "confirm_frames", "expected_flies",
-              "detect_max_w", "assignment", "fit_ellipse", "clahe", "solidity",
-              "sensitivity", "detect_static", "trails", "trail_len"):
-        if k in tk:
-            setattr(tracker, k, tk[k])
-    if "roi" in tk:                      # arena ROI (rebuild mask on load)
-        r = tk["roi"]
-        if r:
-            tracker.set_arena(r["x1"], r["y1"], r["x2"], r["y2"], r.get("shape", "ellipse"))
-        else:
-            tracker.clear_arena()
+    if tk:
+        tracker.apply_config(tk)         # restores ALL tracker settings + arena ROI
     cam = d.get("camera", {})
     if cam:
         if cam.get("overlay"):
@@ -647,7 +631,7 @@ def set_datadir(d: DataDirIn):
 def scheduler_run(s: SchedulerIn):
     if session.running or scheduler.running:
         return {"ok": False, "error": "a session or scheduler is already running"}
-    d = session.start(s.name, _gather_config())
+    d = session.start(s.name, {"setup": _gather_config()})   # full config under "setup"
     camera.start_recording(directory=d)
 
     def _done():

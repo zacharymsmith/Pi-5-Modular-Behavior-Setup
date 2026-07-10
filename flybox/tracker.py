@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import List, Dict
 
 import cv2
@@ -172,6 +172,34 @@ class Tracker:
 
     def has_reference(self) -> bool:
         return self._ref is not None
+
+    def config_dict(self) -> Dict:
+        """EVERY reproducibility-relevant setting, captured automatically from the
+        dataclass fields (excludes private state + runtime values). Any field added
+        in future is saved/restored with no extra wiring — sessions stay complete."""
+        skip = {"tracks", "computed_threshold"}
+        out = {}
+        for f in fields(self):
+            if f.name.startswith("_") or f.name in skip:
+                continue
+            v = getattr(self, f.name)
+            if isinstance(v, (int, float, bool, str, type(None), dict, list)):
+                out[f.name] = v
+        return out
+
+    def apply_config(self, cfg: dict):
+        """Restore all settings saved by config_dict() (arena ROI handled specially)."""
+        for k, v in (cfg or {}).items():
+            if k == "roi":
+                continue
+            if hasattr(self, k):
+                setattr(self, k, v)
+        if "roi" in cfg:
+            r = cfg["roi"]
+            if r:
+                self.set_arena(r["x1"], r["y1"], r["x2"], r["y2"], r.get("shape", "ellipse"))
+            else:
+                self.clear_arena()
 
     def update_reference(self, frame_bgr, tracks):
         """Slowly blend the live frame into the reference at NON-fly pixels only.
