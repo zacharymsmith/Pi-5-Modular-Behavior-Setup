@@ -23,9 +23,12 @@
   .zoomctl{display:flex;align-items:center;gap:6px;margin-left:10px}
   .zoomctl button{padding:5px 10px;font-size:14px;font-weight:700}
   .zoomctl span{font-size:12px;color:var(--muted);min-width:40px;text-align:center}
-  main{display:grid;grid-template-columns:minmax(420px,1.1fr) 1fr;gap:18px;padding:18px;max-width:1500px;margin:0 auto}
-  @media(max-width:1000px){main{grid-template-columns:1fr}}
-  body.wide main{grid-template-columns:1fr;max-width:1400px}
+  main{display:block;padding:18px;max-width:1600px;margin:0 auto}
+  .camgrid{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(300px,1fr);gap:18px;align-items:start}
+  @media(max-width:900px){.camgrid{grid-template-columns:1fr}}
+  .cols{column-count:2;column-gap:18px;margin-top:18px}
+  .cols>.card{break-inside:avoid;margin-bottom:18px}
+  @media(max-width:1000px){.cols{column-count:1}}
   .previewWrap:fullscreen{width:100vw;height:100vh;aspect-ratio:auto;border-radius:0;background:#000}
   .previewWrap:-webkit-full-screen{width:100vw;height:100vh;aspect-ratio:auto;background:#000}
   .col{display:flex;flex-direction:column;gap:18px}
@@ -112,18 +115,17 @@
 </header>
 
 <main>
-  <!-- LEFT -->
-  <div class="col">
-    <section class="card">
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <h2>Camera</h2>
-        <button class="ghost sm" onclick="toggleWide()">⤢ Fullscreen video</button>
-      </div>
-      <p class="sub">Use the Draw tools below to set the arena and trigger zones.</p>
+  <section class="card cam">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <h2>Camera &amp; recording</h2>
+      <button class="ghost sm" onclick="toggleWide()">⤢ Fullscreen video</button>
+    </div>
+    <div class="camgrid">
       <div class="previewWrap">
         <img id="preview" src="/stream.mjpg" alt="live preview">
         <canvas id="roiCanvas"></canvas>
       </div>
+      <div class="camside">
       <div class="drawtools">
         <div class="drawrow">
           <span class="drawlab">Draw</span>
@@ -152,14 +154,19 @@
       <div id="recinfo" class="recbar">● not recording</div>
       <label class="switch" style="margin-top:8px"><input type="checkbox" id="recAnno" onchange="setRecOpts()">
         <span class="track"><span class="knob"></span></span> Also save an annotated copy (tracking + overlays)</label>
-      <label class="switch" style="margin-top:10px"><input type="checkbox" id="mockEn" onchange="setMock()">
-        <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
-      <div class="rowbtns"><button class="primary sm" onclick="selfTest()">🧪 Self-test (sim flies)</button>
-        <small class="hint">turns on mock + tracking + a centre zone, armed & auto-tuned</small></div>
       <div class="statline warn" id="camMsg"></div>
       <div class="rowbtns"><button class="ghost sm" id="camRetry" style="display:none" onclick="retryCam()">↻ Retry camera</button></div>
       <details>
-        <summary>Camera options</summary>
+        <summary>Diagnostics · test without flies</summary>
+        <label class="switch" style="margin-top:8px"><input type="checkbox" id="mockEn" onchange="setMock()">
+          <span class="track"><span class="knob"></span></span> Test mock feed (synthetic 2 flies)</label>
+        <div class="rowbtns"><button class="primary sm" onclick="selfTest()">🧪 Self-test (sim flies)</button>
+          <small class="hint">mock feed + tracking + a centre zone, armed & auto-tuned</small></div>
+      </details>
+      </div><!-- /camside -->
+      </div><!-- /camgrid -->
+      <details>
+        <summary>Camera setup · resolution, exposure, image, overlay</summary>
         <div class="grid3" style="margin-top:10px">
           <div><label>Resolution (HQ cam modes)</label><select id="camRes" onchange="capFps()">
             <option value="640x480">640×480 · fast</option>
@@ -220,6 +227,7 @@
       </details>
     </section>
 
+  <div class="cols">
     <section class="card">
       <h2>Closed-loop stimulation</h2>
       <p class="sub">Zones and proximity are evaluated every frame; red and blue fire independently.</p>
@@ -265,10 +273,7 @@
         <small class="hint" id="minDist">min dist —</small>
       </div>
     </section>
-  </div>
 
-  <!-- RIGHT -->
-  <div class="col">
     <section class="card">
       <h2>Presets · reproducibility</h2>
       <p class="sub">Save the whole setup (protocols, zones, proximity, tracking, camera) and reload it exactly.</p>
@@ -451,7 +456,9 @@
 
     <section class="card">
       <h2>Scheduler · timed plan</h2>
-      <p class="sub">Build a phase list; it runs automatically with recording + logging.</p>
+      <details>
+        <summary>Build an automated timed phase plan</summary>
+      <p class="sub" style="margin-top:10px">Runs a phase list automatically with recording + logging.</p>
       <div class="grid3">
         <div><label>Phase</label><input id="phName" value="baseline"></div>
         <div><label>Duration s</label><input id="phDur" type="number" value="60"></div>
@@ -469,6 +476,7 @@
       </div>
       <div id="phaseList" style="margin-top:6px"><small class="hint">No phases.</small></div>
       <div class="statline" id="schedStat">idle</div>
+      </details>
     </section>
 
     <section class="card">
