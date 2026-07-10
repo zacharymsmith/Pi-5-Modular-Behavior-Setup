@@ -114,8 +114,6 @@ class Tracker:
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
     confirm_frames: int = TRACK_CONFIRM_FRAMES # new blob must persist this long to become a track
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
-    reacquire_frames: int = 250                # remember a lost fly's last position this long;
-                                               # a new blob near it reclaims the OLD id (fewer swaps)
     detect_max_w: int = TRACK_DETECT_MAX_W     # downscale detection to this width (0 = full res)
     trails: bool = TRAIL_ENABLED
     trail_len: int = TRAIL_LENGTH
@@ -129,7 +127,6 @@ class Tracker:
     _mask: object = None
     _mask_shape: object = None
     _adapt_ct: int = 0
-    _lost: Dict = field(default_factory=dict)   # id -> last pos, for reacquisition
 
     # ---- arena ROI (limit tracking to inside the dish) -----------------
     def set_arena(self, nx1, ny1, nx2, ny2, shape="ellipse"):
@@ -419,27 +416,15 @@ class Tracker:
                                "speed": (vx * vx + vy * vy) ** 0.5, "missed": 0,
                                "coasting": False, "age": best.get("age", 0) + 1, **ell})
             else:
-                rid = self._reacquire(x, y)          # reclaim a recently-lost id near here
-                if rid is not None:
-                    tracks.append({"id": rid, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
-                                   "speed": 0.0, "missed": 0, "coasting": False,
-                                   "age": self.confirm_frames, **ell})   # already-established fly
-                    matched_ids.add(rid)
-                else:
-                    tracks.append({"id": self._next_id, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
-                                   "speed": 0.0, "missed": 0, "coasting": False, "age": 1, **ell})
-                    self._next_id += 1
+                tracks.append({"id": self._next_id, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
+                               "speed": 0.0, "missed": 0, "coasting": False, "age": 1, **ell})
+                self._next_id += 1
         # coast unmatched previous tracks through the gap (holds identity + trigger)
         for p in prev:
             if p["id"] in matched_ids:
-                self._lost.pop(p["id"], None)        # active again -> forget its lost memory
                 continue
             missed = p.get("missed", 0) + 1
             if missed > self.max_missed:
-                # coasting exhausted: remember last position so it can be reacquired later
-                self._lost[p["id"]] = {"x": p["px"], "y": p["py"], "cold": 0,
-                                       "angle": p.get("angle"), "major": p.get("major", 0.0),
-                                       "minor": p.get("minor", 0.0)}
                 continue
             vx, vy = p.get("vx", 0.0) * 0.85, p.get("vy", 0.0) * 0.85
             tracks.append({"id": p["id"], "x": int(round(p["px"])), "y": int(round(p["py"])),
@@ -447,24 +432,7 @@ class Tracker:
                            "missed": missed, "coasting": True, "age": p.get("age", 0),
                            "angle": p.get("angle"), "major": p.get("major", 0.0),
                            "minor": p.get("minor", 0.0)})
-        # age out the lost-track memory
-        for lid in list(self._lost):
-            self._lost[lid]["cold"] += 1
-            if self._lost[lid]["cold"] > self.reacquire_frames:
-                del self._lost[lid]
         return tracks
-
-    def _reacquire(self, x, y):
-        """If a recently-lost fly's last position is near (x,y), reclaim its id."""
-        d2 = (self.match_dist * 2.5) ** 2
-        best, bd = None, d2
-        for lid, l in self._lost.items():
-            c = (x - l["x"]) ** 2 + (y - l["y"]) ** 2
-            if c < bd:
-                best, bd = lid, c
-        if best is not None:
-            self._lost.pop(best, None)
-        return best
 
     def process(self, frame_bgr):
         annotated = frame_bgr.copy()

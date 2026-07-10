@@ -51,7 +51,6 @@ class ClosedLoop:
         self.min_dist_px = None
         self._heat = np.zeros((_HEAT_H, _HEAT_W), np.float32)
         self._trails = {}     # fly id -> {"pts":[(nx,ny)...], "last":frame_i}
-        self._last_tracks = []   # most recent frame's tracks (logged per recorded frame)
         self._prev_count = 0
         self._prev_min_dist = None
         self._zone_occ = {}   # zone id -> set of fly ids currently inside
@@ -136,16 +135,10 @@ class ClosedLoop:
         self._prev_count = count
         self._prev_min_dist = self.min_dist_px
 
-        # tracks are logged per WRITTEN video frame (see log_recorded_frame) so
-        # tracks.csv aligns 1:1 with the recorded video, not the free-running loop
-        self._last_tracks = tracks
-        return annotated
-
-    def log_recorded_frame(self, video_frame_idx):
-        """Called by the camera for each frame it writes: log this frame's tracks
-        against the exact 0-based video frame index."""
+        # session logging (tracks every frame while recording)
         if session.running:
-            session.log_tracks(video_frame_idx, self._last_tracks, self.mm_per_px)
+            session.log_tracks(self.frame_i, tracks, self.mm_per_px)
+        return annotated
 
     def _fire(self, channel, source, label, annotated=None, box=None):
         now = time.time()

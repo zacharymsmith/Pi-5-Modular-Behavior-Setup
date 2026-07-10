@@ -1,0 +1,112 @@
+{
+  "name": "test",
+  "started": "2026-07-08T15:01:12.171605",
+  "git_commit": "7860698",
+  "info": {
+    "experimenter": null,
+    "genotype": null,
+    "notes": null
+  },
+  "setup": {
+    "protocols": {
+      "red": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "red",
+        "intensity": 1.0
+      },
+      "blue": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "blue",
+        "intensity": 1.0
+      }
+    },
+    "zones": [
+      {
+        "roi": [
+          0.3136300417246175,
+          0.2111111111111111,
+          0.4443671766342142,
+          0.3925925925925926
+        ],
+        "channel": "red"
+      },
+      {
+        "roi": [
+          0.43602225312934634,
+          0.39814814814814814,
+          0.6557719054242003,
+          0.6574074074074074
+        ],
+        "channel": "blue"
+      }
+    ],
+    "proximity": {
+      "enabled": false,
+      "distance_px": 80,
+      "channel": "blue"
+    },
+    "cooldown_s": 2.0,
+    "calibration": null,
+    "tracker": {
+      "method": "tophat",
+      "threshold": 60,
+      "invert": true,
+      "auto_threshold": true,
+      "min_area": 4,
+      "max_area": 4000,
+      "tophat_kernel": 25,
+      "max_missed": 12,
+      "clahe": true,
+      "bgsub_var": 25,
+      "adaptive_block": 51,
+      "adaptive_C": 5,
+      "trails": false,
+      "trail_len": 30
+    },
+    "camera": {
+      "width": 1024,
+      "height": 768,
+      "fps": 30,
+      "auto_exposure": false,
+      "exposure_us": 18000,
+      "gain": 5.0
+    }
+  },
+  "ended": "2026-07-08T15:06:34.615323",
+  "duration_s": 322.4,
+  "n_events": 4,
+  "n_track_rows": 5151,
+  "summary": {
+    "duration_s": 322.4,
+    "n_flies": 2,
+    "flies": {
+      "85": {
+        "n_points": 5138,
+        "path_px": 1392.5,
+        "mean_speed_px_s": 6.4,
+        "max_speed_px_s": 331.2
+      },
+      "86": {
+        "n_points": 13,
+        "path_px": 0.0,
+        "mean_speed_px_s": 0.0,
+        "max_speed_px_s": 0.0
+      }
+    },
+    "stim_counts": {
+      "blue": 2
+    },
+    "dose_mJ_cm2_total": {
+      "blue": 0.0
+    },
+    "calibration_mm_per_px": null
+  }
+}

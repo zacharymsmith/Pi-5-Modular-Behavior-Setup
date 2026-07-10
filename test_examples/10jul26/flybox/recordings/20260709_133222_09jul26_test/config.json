@@ -1,0 +1,186 @@
+{
+  "name": "09jul26_test",
+  "started": "2026-07-09T13:32:22.608659",
+  "git_commit": "17e0ad5",
+  "info": {
+    "experimenter": null,
+    "genotype": null,
+    "notes": null
+  },
+  "setup": {
+    "protocols": {
+      "red": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "red",
+        "intensity": 1.0
+      },
+      "blue": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "blue",
+        "intensity": 1.0
+      }
+    },
+    "zones": [],
+    "proximity": {
+      "enabled": true,
+      "distance_px": 69,
+      "channel": "blue"
+    },
+    "cooldown_s": 2.0,
+    "calibration": null,
+    "tracker": {
+      "method": "tophat",
+      "threshold": 60,
+      "invert": true,
+      "auto_threshold": true,
+      "min_area": 4,
+      "max_area": 4000,
+      "tophat_kernel": 25,
+      "max_missed": 12,
+      "confirm_frames": 4,
+      "expected_flies": 0,
+      "clahe": false,
+      "bgsub_var": 25,
+      "adaptive_block": 51,
+      "adaptive_C": 5,
+      "roi": {
+        "shape": "ellipse",
+        "x1": 0.2301808066759388,
+        "y1": 0.14814814814814814,
+        "x2": 0.691933240611961,
+        "y2": 0.7555555555555555
+      },
+      "trails": false,
+      "trail_len": 30
+    },
+    "camera": {
+      "width": 1024,
+      "height": 768,
+      "fps": 30,
+      "overlay": {
+        "enabled": true,
+        "title": "",
+        "show_datetime": true,
+        "show_elapsed": true,
+        "show_frame": true,
+        "show_fps": true,
+        "corner": "tl"
+      },
+      "auto_exposure": false,
+      "exposure_us": 33000,
+      "gain": 1.16
+    }
+  },
+  "ended": "2026-07-09T13:37:03.503330",
+  "duration_s": 280.8,
+  "n_events": 11,
+  "n_track_rows": 8711,
+  "summary": {
+    "duration_s": 280.8,
+    "actual_fps": 15.4,
+    "n_flies": 14,
+    "flies": {
+      "1": {
+        "n_points": 451,
+        "path_px": 375.6,
+        "mean_speed_px_s": 7.8,
+        "max_speed_px_s": 558.5
+      },
+      "8": {
+        "n_points": 238,
+        "path_px": 96.3,
+        "mean_speed_px_s": 4.2,
+        "max_speed_px_s": 45.3
+      },
+      "13": {
+        "n_points": 250,
+        "path_px": 641.9,
+        "mean_speed_px_s": 31.5,
+        "max_speed_px_s": 475.9
+      },
+      "34": {
+        "n_points": 86,
+        "path_px": 580.1,
+        "mean_speed_px_s": 89.1,
+        "max_speed_px_s": 570.5
+      },
+      "44": {
+        "n_points": 18,
+        "path_px": 252.2,
+        "mean_speed_px_s": 167.7,
+        "max_speed_px_s": 474.0
+      },
+      "45": {
+        "n_points": 2907,
+        "path_px": 2263.3,
+        "mean_speed_px_s": 10.0,
+        "max_speed_px_s": 474.7
+      },
+      "49": {
+        "n_points": 19,
+        "path_px": 221.4,
+        "mean_speed_px_s": 138.5,
+        "max_speed_px_s": 422.7
+      },
+      "50": {
+        "n_points": 2589,
+        "path_px": 1274.6,
+        "mean_speed_px_s": 6.4,
+        "max_speed_px_s": 467.7
+      },
+      "65": {
+        "n_points": 493,
+        "path_px": 2077.7,
+        "mean_speed_px_s": 60.3,
+        "max_speed_px_s": 431.2
+      },
+      "69": {
+        "n_points": 370,
+        "path_px": 774.2,
+        "mean_speed_px_s": 24.2,
+        "max_speed_px_s": 508.9
+      },
+      "89": {
+        "n_points": 126,
+        "path_px": 758.1,
+        "mean_speed_px_s": 83.3,
+        "max_speed_px_s": 463.6
+      },
+      "95": {
+        "n_points": 18,
+        "path_px": 98.5,
+        "mean_speed_px_s": 70.6,
+        "max_speed_px_s": 164.8
+      },
+      "100": {
+        "n_points": 593,
+        "path_px": 331.3,
+        "mean_speed_px_s": 5.9,
+        "max_speed_px_s": 411.6
+      },
+      "101": {
+        "n_points": 553,
+        "path_px": 881.6,
+        "mean_speed_px_s": 22.3,
+        "max_speed_px_s": 108.8
+      }
+    },
+    "n_spurious_tracks": 0,
+    "spurious_tracks": {},
+    "stim_counts": {
+      "blue": 11
+    },
+    "dose_mJ_cm2_total": {
+      "blue": 0.0
+    },
+    "calibration_mm_per_px": null
+  }
+}

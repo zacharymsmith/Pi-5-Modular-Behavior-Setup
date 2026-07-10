@@ -1,0 +1,5 @@
+t_iso,t_s,source,channel,frequency_hz,pulse_width_ms,train_duration_s,intensity,dose_mJ_cm2,detail
+2026-07-08T15:06:05.935366,293.764,zone-enter,blue,,,,,,zone#2 id85
+2026-07-08T15:06:05.936047,293.764,zone#2,blue,20,10,1.0,1.0,,
+2026-07-08T15:06:07.939223,295.768,zone#2,blue,20,10,1.0,1.0,,
+2026-07-08T15:06:09.311030,297.139,zone-exit,blue,,,,,,zone#2 id85

@@ -1,0 +1,141 @@
+{
+  "name": "test_3",
+  "started": "2026-07-09T16:32:46.455959",
+  "git_commit": "c1f45b2",
+  "info": {
+    "experimenter": null,
+    "genotype": null,
+    "notes": null
+  },
+  "setup": {
+    "protocols": {
+      "red": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "red",
+        "intensity": 1.0
+      },
+      "blue": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "blue",
+        "intensity": 1.0
+      }
+    },
+    "zones": [],
+    "proximity": {
+      "enabled": true,
+      "distance_px": 80,
+      "channel": "blue"
+    },
+    "cooldown_s": 2.0,
+    "calibration": null,
+    "tracker": {
+      "method": "tophat",
+      "threshold": 60,
+      "invert": true,
+      "auto_threshold": true,
+      "min_area": 4,
+      "max_area": 4000,
+      "tophat_kernel": 25,
+      "max_missed": 12,
+      "confirm_frames": 4,
+      "expected_flies": 0,
+      "detect_max_w": 0,
+      "assignment": "greedy",
+      "fit_ellipse": false,
+      "clahe": false,
+      "bgsub_var": 25,
+      "adaptive_block": 51,
+      "adaptive_C": 5,
+      "roi": {
+        "shape": "ellipse",
+        "x1": 0.2329624478442281,
+        "y1": 0.15,
+        "x2": 0.6891515994436718,
+        "y2": 0.7685185185185185
+      },
+      "trails": false,
+      "trail_len": 30
+    },
+    "camera": {
+      "width": 1332,
+      "height": 990,
+      "fps": 30,
+      "overlay": {
+        "enabled": true,
+        "title": "",
+        "show_datetime": true,
+        "show_elapsed": true,
+        "show_frame": true,
+        "show_fps": true,
+        "corner": "tl"
+      },
+      "auto_exposure": false,
+      "exposure_us": 33000,
+      "gain": 1.21
+    }
+  },
+  "ended": "2026-07-09T16:34:08.271397",
+  "duration_s": 81.8,
+  "n_events": 1,
+  "n_track_rows": 1552,
+  "summary": {
+    "duration_s": 81.8,
+    "actual_fps": 9.1,
+    "n_flies": 6,
+    "flies": {
+      "57": {
+        "n_points": 747,
+        "path_px": 558.4,
+        "mean_speed_px_s": 6.2,
+        "max_speed_px_s": 83.2
+      },
+      "56": {
+        "n_points": 747,
+        "path_px": 481.0,
+        "mean_speed_px_s": 5.1,
+        "max_speed_px_s": 116.5
+      },
+      "59": {
+        "n_points": 16,
+        "path_px": 236.1,
+        "mean_speed_px_s": 102.7,
+        "max_speed_px_s": 276.3
+      },
+      "58": {
+        "n_points": 15,
+        "path_px": 2.0,
+        "mean_speed_px_s": 1.5,
+        "max_speed_px_s": 3.9
+      },
+      "64": {
+        "n_points": 13,
+        "path_px": 0.0,
+        "mean_speed_px_s": 2.3,
+        "max_speed_px_s": 5.1
+      },
+      "61": {
+        "n_points": 14,
+        "path_px": 126.0,
+        "mean_speed_px_s": 63.0,
+        "max_speed_px_s": 150.5
+      }
+    },
+    "n_spurious_tracks": 0,
+    "spurious_tracks": {},
+    "stim_counts": {
+      "blue": 1
+    },
+    "dose_mJ_cm2_total": {
+      "blue": 0.0
+    },
+    "calibration_mm_per_px": null
+  }
+}

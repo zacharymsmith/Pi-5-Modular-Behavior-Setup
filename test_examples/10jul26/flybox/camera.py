@@ -54,8 +54,6 @@ class Camera:
         self._rec_lock = threading.Lock()   # guards writer access across threads
         self.force_mock = False
         self.frame_cb = None
-        self.on_recorded_frame = None   # called with the 0-based index of each WRITTEN
-                                        # video frame, so track logging aligns 1:1 to video
         self._brightness = 0.0
         self._focus = 0.0
         self._record_fps = 0.0
@@ -199,14 +197,6 @@ class Camera:
                         self._writer.write(rec)
                         if self._writer2 is not None:
                             self._writer2.write(disp)   # annotated version (all overlays)
-                        # log this frame's tracks against the EXACT video frame index
-                        # (0-based) -> tracks.csv aligns 1:1 with the recorded video
-                        cb = self.on_recorded_frame
-                        if cb is not None:
-                            try:
-                                cb(self._rec_frame - 1)
-                            except Exception:
-                                pass
                 preview = cv2.resize(disp, PREVIEW_SIZE)
                 self._brightness = float(preview.mean())   # live scene brightness 0..255
                 # cheap focus score (sharpness) on the preview centre — higher = sharper

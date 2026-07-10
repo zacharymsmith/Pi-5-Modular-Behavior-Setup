@@ -67,7 +67,7 @@ TRACK_MAX_AREA = 4000          # px; ignore blobs bigger than this (e.g. arena/r
 TRACK_MAX_BLOBS = 10           # cap detections per frame
 TRACK_MATCH_DIST_PX = 90       # max px a fly can move between frames to keep its ID
 TRACK_TOPHAT_KERNEL = 25       # px; ~2x fly body length (illumination-invariant method)
-TRACK_MAX_MISSED = 18          # frames to coast a track through a detection gap (keeps ID)
+TRACK_MAX_MISSED = 12          # frames to coast a track through a detection gap (keeps ID)
 TRACK_CONFIRM_FRAMES = 3       # a new blob must persist this many frames before it gets an ID
 TRACK_EXPECTED_FLIES = 2       # cap on reported flies (0 = unlimited). This is the single
                                # biggest anti-over-detection lever: it keeps only the N most

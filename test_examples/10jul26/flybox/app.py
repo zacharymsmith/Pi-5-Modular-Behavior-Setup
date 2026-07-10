@@ -30,7 +30,6 @@ tracker = Tracker()
 loop = ClosedLoop(tracker)
 scheduler = Scheduler(opto, lights, loop)
 camera.frame_cb = loop.on_frame       # every frame flows through tracking/closed-loop
-camera.on_recorded_frame = loop.log_recorded_frame   # tracks.csv aligns 1:1 to the video
 
 HERE = os.path.dirname(__file__)
 TEMPLATES = os.path.join(HERE, "templates")
