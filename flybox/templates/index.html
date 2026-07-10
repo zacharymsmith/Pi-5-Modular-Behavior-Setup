@@ -23,8 +23,8 @@
   .zoomctl{display:flex;align-items:center;gap:6px;margin-left:10px}
   .zoomctl button{padding:5px 10px;font-size:14px;font-weight:700}
   .zoomctl span{font-size:12px;color:var(--muted);min-width:40px;text-align:center}
-  main{display:block;padding:18px;max-width:1600px;margin:0 auto}
-  .camgrid{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(300px,1fr);gap:18px;align-items:start}
+  main{display:block;padding:18px;max-width:1750px;margin:0 auto}
+  .camgrid{display:grid;grid-template-columns:minmax(0,2.1fr) minmax(340px,1fr);gap:18px;align-items:start}
   @media(max-width:900px){.camgrid{grid-template-columns:1fr}}
   .cols{column-count:2;column-gap:18px;margin-top:18px}
   .cols>.card{break-inside:avoid;margin-bottom:18px}
@@ -163,6 +163,14 @@
         <div class="rowbtns"><button class="primary sm" onclick="selfTest()">🧪 Self-test (sim flies)</button>
           <small class="hint">mock feed + tracking + a centre zone, armed & auto-tuned</small></div>
       </details>
+      <div class="divider"></div>
+      <h2>Fly trajectories</h2>
+      <p class="sub">Each fly's path in its own colour (matching the preview markers); lines thicken where it lingered, and the glow marks the most-visited areas.</p>
+      <img id="heat" src="/api/analytics/heatmap.jpg" style="width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain">
+      <div class="rowbtns">
+        <button class="ghost sm" onclick="resetHeat()">Reset trajectories</button>
+        <small class="hint" id="minDist">min dist —</small>
+      </div>
       </div><!-- /camside -->
       </div><!-- /camgrid -->
       <details>
@@ -262,16 +270,6 @@
       <div class="rowbtns"><button class="sm" onclick="setTriggerProto()">Set trigger protocol from opto panel →</button></div>
       <div class="kv" style="margin-top:8px"><span>Fires this session</span><b id="loopFires">0</b></div>
       <div class="kv"><span>Last fire</span><b id="loopLast">—</b></div>
-    </section>
-
-    <section class="card">
-      <h2>Live analytics</h2>
-      <p class="sub">Occupancy heatmap (accumulated) and closest inter-fly distance.</p>
-      <img id="heat" src="/api/analytics/heatmap.jpg" style="width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain">
-      <div class="rowbtns">
-        <button class="ghost sm" onclick="resetHeat()">Reset heatmap</button>
-        <small class="hint" id="minDist">min dist —</small>
-      </div>
     </section>
 
     <section class="card">
