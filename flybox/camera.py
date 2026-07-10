@@ -39,7 +39,9 @@ class Camera:
                          "exposure_us": CAMERA_EXPOSURE_US,
                          "gain": CAMERA_GAIN,
                          "contrast": 1.0,       # ISP contrast (1.0 = neutral, >1 = punchier)
-                         "brightness": 0.0}     # ISP brightness (-1..1, 0 = neutral)
+                         "brightness": 0.0,     # ISP brightness (-1..1, 0 = neutral)
+                         "sharpness": 1.0,      # ISP sharpness (0 = soft, 1 = neutral, >1 = crisp)
+                         "saturation": 1.0}     # ISP colour saturation (0 = grey, 1 = neutral)
         self._cond = threading.Condition()
         self._jpeg = None
         self._frame = None
@@ -76,8 +78,10 @@ class Camera:
             c["AeEnable"] = False
             c["ExposureTime"] = int(self.controls["exposure_us"])
             c["AnalogueGain"] = float(self.controls["gain"])
-        c["Contrast"] = float(self.controls.get("contrast", 1.0))     # ISP image tuning —
-        c["Brightness"] = float(self.controls.get("brightness", 0.0)) # helps low-contrast flies pop
+        c["Contrast"] = float(self.controls.get("contrast", 1.0))       # ISP image tuning —
+        c["Brightness"] = float(self.controls.get("brightness", 0.0))   # helps low-contrast flies pop
+        c["Sharpness"] = float(self.controls.get("sharpness", 1.0))     # crisper fly edges
+        c["Saturation"] = float(self.controls.get("saturation", 1.0))   # 0 = greyscale (kills dish hue)
         return c
 
     def _open(self):
@@ -115,7 +119,8 @@ class Camera:
         return self.message
 
     def apply_config(self, size=None, fps=None, auto_exposure=None,
-                     exposure_us=None, gain=None, contrast=None, brightness=None) -> str | None:
+                     exposure_us=None, gain=None, contrast=None, brightness=None,
+                     sharpness=None, saturation=None) -> str | None:
         """Change camera specs at runtime. Resolution/fps changes reconfigure the
         camera; exposure/gain apply live. Refused while recording (would corrupt
         the file)."""
@@ -138,6 +143,10 @@ class Camera:
             self.controls["contrast"] = max(0.0, min(32.0, float(contrast)))
         if brightness is not None:
             self.controls["brightness"] = max(-1.0, min(1.0, float(brightness)))
+        if sharpness is not None:
+            self.controls["sharpness"] = max(0.0, min(16.0, float(sharpness)))
+        if saturation is not None:
+            self.controls["saturation"] = max(0.0, min(32.0, float(saturation)))
 
         if self.hw and self._cam is not None:
             try:

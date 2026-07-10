@@ -185,7 +185,15 @@
           <label>Brightness</label><input id="camBright" type="range" min="-0.5" max="0.5" step="0.02" value="0" oninput="setImg()">
           <span class="val" id="camBrightVal">0.00</span>
         </div>
-        <small class="hint">Live image tuning — raise contrast to make low-contrast flies pop for tracking. Applies to the preview and the recording.</small>
+        <div class="slider">
+          <label>Sharpness</label><input id="camSharp" type="range" min="0" max="8" step="0.5" value="1" oninput="setImg()">
+          <span class="val" id="camSharpVal">1.0</span>
+        </div>
+        <div class="slider">
+          <label>Saturation</label><input id="camSat" type="range" min="0" max="4" step="0.1" value="1" oninput="setImg()">
+          <span class="val" id="camSatVal">1.0</span>
+        </div>
+        <small class="hint">Live image tuning — raise contrast/sharpness to make low-contrast flies pop; drop saturation to 0 for greyscale (removes the pink dish hue). Applies to preview + recording.</small>
         <div class="rowbtns" style="margin-top:10px">
           <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
@@ -359,6 +367,10 @@
       </div>
       <small class="hint">Higher = catch fainter / lower-contrast flies. Lower = stricter (less noise). Watch the mask below as you drag.</small>
 
+      <label class="switch" style="margin-top:10px"><input type="checkbox" id="detStatic" onchange="setTrack()">
+        <span class="track"><span class="knob"></span></span> Detect motionless flies (by appearance)</label>
+      <small class="hint">Also finds a still/sleeping/dead fly that has stopped moving — reference subtraction alone treats a motionless fly as background.</small>
+
       <div class="rowbtns" style="margin-top:8px"><button class="ghost sm" onclick="toggleMask()"><span id="maskBtn">Show detection mask</span></button>
         <small class="hint">see exactly what the tracker detects</small></div>
       <img id="maskimg" src="/api/track/mask.jpg" style="display:none;width:100%;border-radius:8px;background:#000;aspect-ratio:4/3;object-fit:contain;margin-top:8px">
@@ -514,6 +526,7 @@ function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal')
     max_area:+$('maxarea').value,tophat_kernel:+$('tophat').value,max_missed:+$('maxmiss').value,
     confirm_frames:+$('confirm').value,expected_flies:+$('expflies').value,detect_max_w:+$('detw').value,
     assignment:$('assign').value,fit_ellipse:$('fitEll').checked,sensitivity:+$('sens').value,
+    detect_static:$('detStatic').checked,
     clahe:$('clahe').checked,trails:$('trailsEn').checked,trail_len:+$('trailLen').value});}
 let hasRef=false, building=false;
 function buildBG(){if(building)return;building=true;
@@ -542,7 +555,10 @@ function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
     exposure_us:+$('camExp').value,gain:+$('camGain').value}).then(r=>{if(!r.ok&&r.error)alert(r.error);});}
 function setImg(){$('camContrastVal').textContent=(+$('camContrast').value).toFixed(1);
   $('camBrightVal').textContent=(+$('camBright').value).toFixed(2);
-  post('/api/camera/config',{contrast:+$('camContrast').value,brightness:+$('camBright').value});}
+  $('camSharpVal').textContent=(+$('camSharp').value).toFixed(1);
+  $('camSatVal').textContent=(+$('camSat').value).toFixed(1);
+  post('/api/camera/config',{contrast:+$('camContrast').value,brightness:+$('camBright').value,
+    sharpness:+$('camSharp').value,saturation:+$('camSat').value});}
 function setRecOpts(){post('/api/camera/record_opts',{record_annotated:$('recAnno').checked});}
 function setOverlay(){post('/api/camera/overlay',{enabled:$('ovEnabled').checked,title:$('ovTitle').value,
   show_datetime:$('ovDate').checked,show_elapsed:$('ovElapsed').checked,show_frame:$('ovFrame').checked,
@@ -768,6 +784,7 @@ async function refresh(){
     $('confirm').value=s.tracker.confirm_frames;$('confirmVal').textContent=s.tracker.confirm_frames;
     $('expflies').value=s.tracker.expected_flies;
     if(document.activeElement!==$('sens')&&s.tracker.sensitivity!=null){$('sens').value=s.tracker.sensitivity;$('sensVal').textContent=s.tracker.sensitivity;}
+    if(s.tracker.detect_static!=null)$('detStatic').checked=s.tracker.detect_static;
     $('detw').value=s.tracker.detect_max_w;
     $('assign').value=s.tracker.assignment;
     $('fitEll').checked=s.tracker.fit_ellipse;
@@ -785,6 +802,10 @@ async function refresh(){
       $('camContrast').value=s.camera.controls.contrast;$('camContrastVal').textContent=(+s.camera.controls.contrast).toFixed(1);}
     if(document.activeElement!==$('camBright')&&s.camera.controls.brightness!=null){
       $('camBright').value=s.camera.controls.brightness;$('camBrightVal').textContent=(+s.camera.controls.brightness).toFixed(2);}
+    if(document.activeElement!==$('camSharp')&&s.camera.controls.sharpness!=null){
+      $('camSharp').value=s.camera.controls.sharpness;$('camSharpVal').textContent=(+s.camera.controls.sharpness).toFixed(1);}
+    if(document.activeElement!==$('camSat')&&s.camera.controls.saturation!=null){
+      $('camSat').value=s.camera.controls.saturation;$('camSatVal').textContent=(+s.camera.controls.saturation).toFixed(1);}
     const ov=s.camera.overlay||{};
     $('ovEnabled').checked=ov.enabled;$('ovTitle').value=ov.title||'';
     $('ovDate').checked=ov.show_datetime;$('ovElapsed').checked=ov.show_elapsed;

@@ -99,6 +99,9 @@ class Tracker:
                                  # the reference at non-fly pixels, so lighting drift AND a
                                  # briefly-baked-in fly can never permanently blind detection
     bg_learn: float = 0.03       # adaptation rate per processed frame (~1-2 s to heal)
+    detect_static: bool = False  # also find motionless flies by APPEARANCE (dark/bright blob),
+                                 # not just by change — catches a sleeping/frozen/dead fly that
+                                 # reference-subtraction alone would treat as background
     min_area: int = TRACK_MIN_AREA
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
@@ -237,6 +240,25 @@ class Tracker:
                 thr = int(min(ceil, max(floor, otsu)))
                 self.computed_threshold = thr
                 _, th = cv2.threshold(diff, thr, 255, cv2.THRESH_BINARY)
+                if self.detect_static:
+                    # ALSO find flies by appearance so a motionless fly (no difference
+                    # from the reference) is still detected. BLACK-HAT morphology
+                    # isolates small LOCAL dark spots (the fly) regardless of the
+                    # large-scale background level — robust on a non-uniform dish where
+                    # a global threshold would flood. (Top-hat if the fly is lighter.)
+                    k = max(9, int(self.tophat_kernel) | 1)
+                    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+                    mop = cv2.MORPH_BLACKHAT if self.invert else cv2.MORPH_TOPHAT
+                    feat = cv2.morphologyEx(gray, mop, ker)
+                    _, app = cv2.threshold(feat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    if dm is not None:
+                        app = cv2.bitwise_and(app, dm)                 # ROI only
+                    # FLOOD GUARD: a real fly is a tiny fraction of the dish. If the
+                    # appearance mask covers a big area it's texture/noise, not a fly —
+                    # discard so we never swamp the real refsub detections.
+                    roi_area = int((dm > 0).sum()) if dm is not None else app.size
+                    if roi_area > 0 and int((app > 0).sum()) <= 0.04 * roi_area:
+                        th = cv2.bitwise_or(th, app)
         elif self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
             # black-hat isolates dark spots on a bright bg; top-hat the reverse.
@@ -479,7 +501,7 @@ class Tracker:
                 "confirm_frames": self.confirm_frames, "expected_flies": self.expected_flies,
                 "detect_max_w": self.detect_max_w, "assignment": self.assignment,
                 "fit_ellipse": self.fit_ellipse, "solidity": self.solidity, "clahe": self.clahe,
-                "sensitivity": self.sensitivity,
+                "sensitivity": self.sensitivity, "detect_static": self.detect_static,
                 "trails": self.trails, "trail_len": self.trail_len,
                 "roi": self.roi, "has_roi": self.roi is not None,
                 "has_reference": self.has_reference(),
