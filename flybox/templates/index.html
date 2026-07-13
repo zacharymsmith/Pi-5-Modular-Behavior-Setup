@@ -176,13 +176,8 @@
       <details>
         <summary>Camera setup · resolution, exposure, image, overlay</summary>
         <div class="grid3" style="margin-top:10px">
-          <div><label>Resolution (HQ cam modes)</label><select id="camRes" onchange="capFps()">
-            <option value="640x480">640×480 · fast</option>
+          <div><label id="camResLabel">Resolution</label><select id="camRes" onchange="capFps()">
             <option value="1024x768">1024×768</option>
-            <option value="1332x990">1332×990 · native (≤120 fps)</option>
-            <option value="2028x1080">2028×1080 · native (≤50 fps)</option>
-            <option value="2028x1520">2028×1520 · native (≤40 fps)</option>
-            <option value="4056x3040">4056×3040 · full (≤10 fps)</option>
           </select></div>
           <div><label>FPS</label><input id="camFps" type="number" value="30" min="1" max="120"></div>
           <div style="align-self:end"><label class="switch"><input type="checkbox" id="camAuto" checked onchange="camAutoToggle()">
@@ -365,8 +360,8 @@
       </div>
 
       <div class="slider" style="margin-top:8px">
-        <label>Detection sensitivity</label><input id="sens" type="range" min="0" max="100" value="50" oninput="setTrack()">
-        <span class="val" id="sensVal">50</span>
+        <label>Detection sensitivity</label><input id="sens" type="range" min="0" max="100" value="55" oninput="setTrack()">
+        <span class="val" id="sensVal">55</span>
       </div>
       <small class="hint">Higher = catch fainter / lower-contrast flies. Lower = stricter (less noise). Watch the mask below as you drag.</small>
 
@@ -427,6 +422,8 @@
         </div>
       </details>
       <div class="kv" style="margin-top:12px"><span>Currently tracked</span><b id="trackCount">0</b></div>
+      <div class="kv"><span>Detection health</span><b id="detHealth">—</b></div>
+      <small class="hint" id="detHealthHint"></small>
     </section>
 
     <section class="card">
@@ -553,7 +550,25 @@ function autoTune(){post('/api/track/autotune').then(r=>{
 
 // camera options
 function camAutoToggle(){const a=$('camAuto').checked;$('camExp').disabled=a;$('camGain').disabled=a;}
-const MODE_FPS={"640x480":50,"1024x768":40,"1332x990":120,"2028x1080":50,"2028x1520":40,"4056x3040":10};
+let MODE_FPS={"1024x768":40}, camModeSig='';
+// rebuild the resolution list from whatever sensor is actually plugged in (HQ imx477,
+// Cam Module 3 imx708 NoIR, etc.) — native modes + universal downscales that any sensor supports
+function buildCamModes(s){
+  const modes=s.camera.sensor_modes||[], model=s.camera.sensor_model||'camera';
+  const sig=model+':'+modes.map(m=>`${m.w}x${m.h}@${m.fps}`).join(',');
+  if(sig===camModeSig)return; camModeSig=sig;
+  $('camResLabel').textContent='Resolution · '+model+(modes.length?' (auto-detected)':'');
+  const universal=[[640,480,60],[800,600,60],[1024,768,50]];
+  const nat=modes.map(m=>[m.w,m.h,m.fps||30]);
+  MODE_FPS={}; const seen={}; let opts='';
+  for(const [w,h,f] of [...universal,...nat]){const key=w+'x'+h; if(seen[key])continue; seen[key]=1;
+    MODE_FPS[key]=f; const isNat=nat.some(n=>n[0]===w&&n[1]===h);
+    opts+=`<option value="${key}">${w}×${h} · ≤${f}fps${isNat?' · native':' · fast'}</option>`;}
+  const cur=$('camRes').value; $('camRes').innerHTML=opts;
+  const sz=s.camera.size[0]+'x'+s.camera.size[1];
+  $('camRes').value=[...$('camRes').options].some(o=>o.value===cur)?cur:sz;
+  capFps();
+}
 function capFps(){const m=MODE_FPS[$('camRes').value]||30;$('camFps').max=m;
   if(+$('camFps').value>m)$('camFps').value=m;}
 function applyCam(){const [w,h]=$('camRes').value.split('x').map(Number);
@@ -715,9 +730,10 @@ function proto1(p){return `${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.t
 async function refresh(){
   let s;try{s=await fetch('/api/status').then(r=>r.json());}catch(e){return;}
   const badge=ok=>`<span class="badge ${ok?'ok':'mock'}"></span>`;
-  const camLabel=s.camera.mock?'mock (test)':(s.camera.hw?'live':'mock');
+  const camLabel=s.camera.mock?'mock (test)':(s.camera.hw?(s.camera.sensor_model||'live'):'no camera');
   $('chipCam').innerHTML=badge(s.camera.hw)+'camera <b>'+camLabel+'</b>';
   $('chipCam').title=s.camera.message||'';
+  buildCamModes(s);   // auto-populate resolution list for the detected sensor
   $('chipPca').innerHTML=badge(s.opto.hw)+'PCA9685 <b>'+(s.opto.hw?'linked':'mock')+'</b>';
   $('chipFps').innerHTML='<b>'+(s.camera.fps||0)+'</b> fps';
   // only warn / offer retry when there's NO real camera (not for the test toggle)
@@ -730,6 +746,11 @@ async function refresh(){
   $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
   $('optoStat').className='statline'+(s.opto.running?' on':'');
   $('trackCount').textContent=s.tracker.count;
+  const dh=s.tracker.det_health;
+  if(dh==null){$('detHealth').textContent='—';$('detHealth').style.color='';$('detHealthHint').textContent='set Expected flies to monitor';}
+  else{$('detHealth').textContent=dh+'%';
+    $('detHealth').style.color=dh>=85?'var(--green)':dh>=55?'var(--amber)':'var(--red)';
+    $('detHealthHint').textContent=dh>=85?'detection is solid ✓':'flies often missed — raise Detection sensitivity or Contrast, or improve lighting';}
   hasRef=!!s.tracker.has_reference;
   $('loopFires').textContent=s.loop.fires;
   $('loopLast').textContent=s.loop.last_event;

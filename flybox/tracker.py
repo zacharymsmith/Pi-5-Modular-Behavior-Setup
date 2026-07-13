@@ -106,8 +106,9 @@ class Tracker:
     max_area: int = TRACK_MAX_AREA
     max_blobs: int = TRACK_MAX_BLOBS
     match_dist: int = TRACK_MATCH_DIST_PX
-    sensitivity: int = 50                      # 0-100: higher = catch fainter flies (lower diff
-                                               # threshold), lower = stricter (less noise). 50 = default
+    sensitivity: int = 55                      # 0-100: higher = catch fainter flies (lower diff
+                                               # threshold), lower = stricter (less noise). 55 = a mild
+                                               # bump that improved coverage on low-contrast footage
     solidity: float = 0.4                      # reject thin/edge blobs (area/hull); 0 = off
     assignment: str = "greedy"                 # "greedy" (best identity COVERAGE — keeps the N
                                                # real flies labelled) | "hungarian" (0 swaps but
@@ -119,8 +120,9 @@ class Tracker:
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
     reacquire_frames: int = 250                # remember a lost fly's last position this long;
                                                # a new blob near it reclaims the OLD id (fewer swaps)
-    predict: float = 1.2                       # frames of motion to extrapolate when matching —
-                                               # carries identity through crossings without overshoot
+    predict: float = 1.0                       # frames of motion to extrapolate when matching.
+                                               # 1.0 + the predicted-OR-actual cost = best identity
+                                               # coverage with fewest swaps across 7 test videos
     vel_smooth: float = 0.6                    # velocity estimate responsiveness (0..1)
     detect_max_w: int = TRACK_DETECT_MAX_W     # downscale detection to this width (0 = full res)
     trails: bool = TRAIL_ENABLED
@@ -136,6 +138,7 @@ class Tracker:
     _mask_shape: object = None
     _adapt_ct: int = 0
     _lost: Dict = field(default_factory=dict)   # id -> last pos, for reacquisition
+    _det_hist: deque = field(default_factory=lambda: deque(maxlen=90))  # recent raw detect counts
 
     # ---- arena ROI (limit tracking to inside the dish) -----------------
     def set_arena(self, nx1, ny1, nx2, ny2, shape="ellipse"):
@@ -412,6 +415,7 @@ class Tracker:
         return matches
 
     def _assign(self, dets):
+        self._det_hist.append(len(dets))    # raw detections this frame (for detection health)
         prev = list(self._prev)
         for p in prev:  # predict where each fly should be this frame (momentum carries
             p["px"] = p["x"] + self.predict * p.get("vx", 0.0)   # identity through a crossing)
@@ -578,4 +582,14 @@ class Tracker:
                 "trails": self.trails, "trail_len": self.trail_len,
                 "roi": self.roi, "has_roi": self.roi is not None,
                 "has_reference": self.has_reference(),
+                "det_health": self._det_health(),
                 "count": len(self.tracks)}
+
+    def _det_health(self):
+        """% of recent frames where raw detection found at least the expected number of
+        flies — a live signal of whether the image/exposure is good enough to track.
+        None until enough history / when no fly count is set."""
+        if not self.expected_flies or len(self._det_hist) < 10:
+            return None
+        good = sum(1 for c in self._det_hist if c >= self.expected_flies)
+        return int(round(100.0 * good / len(self._det_hist)))

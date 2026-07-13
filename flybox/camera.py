@@ -53,6 +53,8 @@ class Camera:
         self._writer2 = None            # optional annotated (overlays burned in) video
         self.record_annotated = False
         self._rec_lock = threading.Lock()   # guards writer access across threads
+        self.sensor_model = None        # e.g. "imx477" (HQ) or "imx708" (Cam Module 3) — auto-detected
+        self.sensor_modes = []          # native [{w,h,fps}] modes for the detected sensor
         self.force_mock = False
         self.frame_cb = None
         self.on_recorded_frame = None   # called with the 0-based index of each WRITTEN
@@ -95,14 +97,38 @@ class Camera:
         c["Saturation"] = float(self.controls.get("saturation", 1.0))   # 0 = greyscale (kills dish hue)
         return c
 
+    def _read_sensor_info(self, cam):
+        """Auto-detect the connected sensor (e.g. imx477 HQ, imx708 Cam Module 3) and
+        its native resolution/fps modes, so the UI can offer the right options for
+        whatever camera is plugged in — no hard-coding per sensor."""
+        try:
+            self.sensor_model = (cam.camera_properties or {}).get("Model")
+        except Exception:
+            self.sensor_model = None
+        best = {}
+        try:
+            for m in (cam.sensor_modes or []):
+                sz = m.get("size")
+                fps = m.get("fps")
+                if not sz:
+                    continue
+                k = (int(sz[0]), int(sz[1]))
+                f = int(round(float(fps))) if fps else None
+                if k not in best or (f or 0) > (best[k] or 0):
+                    best[k] = f
+        except Exception:
+            pass
+        self.sensor_modes = [{"w": w, "h": h, "fps": f} for (w, h), f in sorted(best.items())]
+
     def _open(self):
         if not _HW_CAM:
             self.hw = False
             self._cam = None
-            self.message = f"mock — picamera2 not importable ({_IMPORT_ERR})"
+            self.message = "using synthetic test feed (no Pi camera library on this machine)"
             return
         try:
             cam = Picamera2()
+            self._read_sensor_info(cam)                 # detect sensor + its native modes
             cfg = cam.create_video_configuration(
                 main={"size": tuple(self.size), "format": "RGB888"},
                 controls=self._cam_controls(),
@@ -111,11 +137,18 @@ class Camera:
             cam.start()
             self._cam = cam
             self.hw = True
-            self.message = f"live · {self.size[0]}x{self.size[1]} @ {self.fps}fps"
+            model = self.sensor_model or "camera"
+            self.message = f"live · {model} · {self.size[0]}x{self.size[1]} @ {self.fps}fps"
         except Exception as e:
             self.hw = False
             self._cam = None
-            self.message = f"mock — camera busy/unavailable: {e}"
+            # a busy camera almost always means the app is already running elsewhere —
+            # not a fault. Word it so it doesn't read like a hardware error.
+            es = str(e).lower()
+            if "busy" in es or "in use" in es or "resource" in es:
+                self.message = "camera is in use by another program (already running?) — using test feed"
+            else:
+                self.message = f"no camera detected — using test feed ({e})"
 
     def reinit(self):
         try:
@@ -451,6 +484,8 @@ class Camera:
             "fps": round(self._fps_est, 1),
             "size": list(self.size),
             "target_fps": self.fps,
+            "sensor_model": self.sensor_model,
+            "sensor_modes": self.sensor_modes,
             "controls": dict(self.controls),
             "brightness": round(self._brightness, 1),
             "focus": round(self._focus, 0),
