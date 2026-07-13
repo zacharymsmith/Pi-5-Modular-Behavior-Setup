@@ -206,10 +206,15 @@
         <small class="hint">Live image tuning — raise contrast/sharpness to make low-contrast flies pop; drop saturation to 0 for greyscale (removes the pink dish hue). Applies to preview + recording.</small>
         <div class="rowbtns" style="margin-top:10px">
           <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
+          <button class="ghost sm" id="afBtn" style="display:none" onclick="autoFocus()">🎯 Autofocus now</button>
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
         </div>
+        <label class="switch" id="afContWrap" style="display:none;margin-top:8px"><input type="checkbox" id="afCont" onchange="afContinuous()">
+          <span class="track"><span class="knob"></span></span> Continuous autofocus</label>
         <div class="kv"><span>Live scene brightness (0–255)</span><b id="brightVal">—</b></div>
-        <div class="kv"><span>Focus score (turn lens to maximize)</span><b id="focusVal">—</b></div>
+        <div class="kv"><span>Highlights clipped</span><b id="clipVal">—</b></div>
+        <small class="hint" id="clipHint"></small>
+        <div class="kv"><span id="focusLbl">Focus score (turn lens to maximize)</span><b id="focusVal">—</b></div>
         <div class="divider"></div>
         <label class="switch"><input type="checkbox" id="ovEnabled" checked onchange="setOverlay()">
           <span class="track"><span class="knob"></span></span> Burn info overlay into video</label>
@@ -589,6 +594,10 @@ function autoExpose(){$('expInfo').textContent='metering the arena…';
     if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
     $('expInfo').textContent=`locked ${r.exposure_us}µs · gain ${r.gain} · arena≈${r.measured}`+(r.metered_arena?'':' (whole frame — set an arena ROI)');
     built=false;refresh();});}
+function autoFocus(){$('expInfo').textContent='autofocusing…';
+  post('/api/camera/autofocus').then(r=>{
+    $('expInfo').textContent=r.ok?`focus locked · lens ${r.lens_position} · sharpness ${r.focus}`:(r.error||'failed');});}
+function afContinuous(){post('/api/camera/af_continuous',{on:$('afCont').checked});}
 
 // presets
 async function refreshPresets(){const r=await fetch('/api/presets').then(x=>x.json());
@@ -775,6 +784,15 @@ async function refresh(){
   if(s.paths) $('pathInfo').textContent='sessions → '+s.paths.sessions_dir+'  ·  presets → '+s.paths.presets_dir;
   if(s.camera.brightness!=null) $('brightVal').textContent=s.camera.brightness;
   if(s.camera.focus!=null) $('focusVal').textContent=s.camera.focus;
+  const clip=s.camera.clipped;
+  if(clip!=null){$('clipVal').textContent=clip+'%';
+    $('clipVal').style.color=clip<=2?'var(--green)':clip<=8?'var(--amber)':'var(--red)';
+    $('clipHint').textContent=clip<=2?'good — highlights not blown':'lower exposure/brightness to recover detail in the bright dish';}
+  // autofocus controls only for AF-capable sensors (Cam Module 3); HQ cam = manual lens
+  const af=!!s.camera.has_autofocus;
+  $('afBtn').style.display=af?'inline-block':'none';
+  $('afContWrap').style.display=af?'flex':'none';
+  $('focusLbl').textContent=af?('Focus score'+(s.camera.lens_position!=null?' · lens '+s.camera.lens_position:'')):'Focus score (turn lens to maximize)';
   updateRecBar(s.camera);
   // keep illumination sliders showing the ACTUAL light levels (unless being dragged)
   document.querySelectorAll('#lights input[data-light]').forEach(inp=>{

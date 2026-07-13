@@ -102,7 +102,15 @@ controllable.
 
 ---
 
-## 5. Pi 5 GPIO / PWM software stack
+> **⚠️ Design note (updated 2026-07):** the *shipped software* drives the PicoBuck PWM
+> inputs from the **PCA9685** (ch2 = red, ch3 = blue), software-gated ON/OFF — **not** from
+> the Pi's GPIO18. This keeps all control I/O on one board and was verified on the real box
+> (see `flybox/config.py`, which is the source of truth). The GPIO18 hardware-PWM approach
+> below remains valid and is the option to reach for **if you need tighter pulse-edge timing
+> than software gating provides**; wire the PicoBuck input to GPIO18 and set the opto channel
+> accordingly. For the current build, everything is PCA9685.
+
+## 5. Pi 5 GPIO / PWM software stack (reference / optional hardware-PWM path)
 
 The Pi 5's RP1 I/O chip **broke the old libraries**:
 

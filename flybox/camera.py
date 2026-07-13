@@ -66,7 +66,10 @@ class Camera:
         self.preview_fps = 15           # cap the browser preview encode rate (saves loop time)
         self._last_preview = 0.0
         self._brightness = 0.0
+        self._clipped = 0.0             # % of preview pixels blown out (>245) — highlight clipping
         self._focus = 0.0
+        self.has_autofocus = False      # true for AF sensors (Cam Module 3 imx708); false for HQ
+        self.lens_position = None
         self._record_fps = 0.0
         self._rec_frame = 0
         self._rec_t0 = 0.0
@@ -137,8 +140,13 @@ class Camera:
             cam.start()
             self._cam = cam
             self.hw = True
+            try:
+                self.has_autofocus = "AfMode" in (cam.camera_controls or {})
+            except Exception:
+                self.has_autofocus = False
             model = self.sensor_model or "camera"
-            self.message = f"live · {model} · {self.size[0]}x{self.size[1]} @ {self.fps}fps"
+            af = " · autofocus" if self.has_autofocus else ""
+            self.message = f"live · {model}{af} · {self.size[0]}x{self.size[1]} @ {self.fps}fps"
         except Exception as e:
             self.hw = False
             self._cam = None
@@ -263,6 +271,7 @@ class Camera:
                     preview = cv2.resize(disp, PREVIEW_SIZE)
                     self._brightness = float(preview.mean())   # live scene brightness 0..255
                     pg = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
+                    self._clipped = float((pg > 245).mean() * 100.0)   # highlight clipping %
                     ph, pw = pg.shape
                     self._focus = float(cv2.Laplacian(
                         pg[int(ph * .15):int(ph * .85), int(pw * .15):int(pw * .85)],
@@ -379,7 +388,39 @@ class Camera:
                         (max(1, (x2 - x1) // 2), max(1, (y2 - y1) // 2)), 0, 0, 360, 255, -1)
         return m > 0
 
-    def autoexpose_arena(self, roi=None, target: int = 150, iters: int = 9) -> dict:
+    def autofocus_once(self) -> dict:
+        """One-shot autofocus (Cam Module 3 etc.), then LOCK the lens there — ideal for a
+        fixed-distance dish: focus once, no hunting during the experiment."""
+        if not (self.hw and self._cam is not None):
+            return {"ok": False, "error": "no live camera"}
+        if not self.has_autofocus:
+            return {"ok": False, "error": "this sensor has no autofocus — focus manually with the lens ring"}
+        try:
+            self._cam.set_controls({"AfMode": 1, "AfTrigger": 0})   # Auto mode, start a sweep
+            time.sleep(2.0)
+            pos = None
+            try:
+                pos = self._cam.capture_metadata().get("LensPosition")
+            except Exception:
+                pass
+            if pos is not None:                                     # lock at the found position
+                self._cam.set_controls({"AfMode": 0, "LensPosition": float(pos)})
+                self.lens_position = round(float(pos), 3)
+            return {"ok": True, "lens_position": self.lens_position, "focus": round(self._focus, 0)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def set_continuous_af(self, on: bool) -> dict:
+        """Continuous autofocus on/off (only if the sensor supports it)."""
+        if not (self.hw and self._cam is not None and self.has_autofocus):
+            return {"ok": False, "error": "no autofocus on this camera"}
+        try:
+            self._cam.set_controls({"AfMode": 2 if on else 0})
+            return {"ok": True, "continuous": bool(on)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def autoexpose_arena(self, roi=None, target: int = 140, iters: int = 9) -> dict:
         """Iteratively set exposure (then gain) so the mean brightness INSIDE the
         arena ROI hits `target`, then lock it. Meters only the arena, so the bright
         rim/background doesn't fool it. Run after changing your IR."""
@@ -488,6 +529,9 @@ class Camera:
             "sensor_modes": self.sensor_modes,
             "controls": dict(self.controls),
             "brightness": round(self._brightness, 1),
+            "clipped": round(self._clipped, 1),
+            "has_autofocus": self.has_autofocus,
+            "lens_position": self.lens_position,
             "focus": round(self._focus, 0),
             "overlay": dict(self.overlay),
             "record_annotated": self.record_annotated,

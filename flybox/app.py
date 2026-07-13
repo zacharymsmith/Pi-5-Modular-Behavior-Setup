@@ -475,6 +475,20 @@ def camera_autoexpose():
     return res
 
 
+@app.post("/api/camera/autofocus")
+def camera_autofocus():
+    return camera.autofocus_once()
+
+
+class AfContIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/camera/af_continuous")
+def camera_af_continuous(a: AfContIn):
+    return camera.set_continuous_af(a.on)
+
+
 @app.post("/api/camera/config")
 def camera_config(c: CameraConfigIn):
     size = None
