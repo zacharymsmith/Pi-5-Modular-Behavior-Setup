@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import time
+import queue
 import threading
 from datetime import datetime
 
@@ -56,6 +57,12 @@ class Camera:
         self.frame_cb = None
         self.on_recorded_frame = None   # called with the 0-based index of each WRITTEN
                                         # video frame, so track logging aligns 1:1 to video
+        # video encoding runs in a BACKGROUND thread so the capture+tracking loop never
+        # blocks on it (Pi 5 has no hardware encoder) — this decouples tracking fps from
+        # the slow software encode. Bounded queue overlaps encode with the next capture.
+        self._rec_q = queue.Queue(maxsize=8)
+        self.preview_fps = 15           # cap the browser preview encode rate (saves loop time)
+        self._last_preview = 0.0
         self._brightness = 0.0
         self._focus = 0.0
         self._record_fps = 0.0
@@ -68,6 +75,8 @@ class Camera:
         os.makedirs(RECORDING_DIR, exist_ok=True)
 
         self._open()
+        self._enc_t = threading.Thread(target=self._encoder_loop, daemon=True)
+        self._enc_t.start()
         self._t = threading.Thread(target=self._loop, daemon=True)
         self._t.start()
 
@@ -191,46 +200,71 @@ class Camera:
                 disp = annotated
                 if ov:
                     disp = self._draw_overlay(annotated.copy(), recording=self.recording)
-                # write video under a lock so Stop can't free the writer mid-write (segfault)
-                with self._rec_lock:
-                    if self.recording and self._writer is not None:
-                        self._rec_frame += 1
-                        rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame
-                        self._writer.write(rec)
-                        if self._writer2 is not None:
-                            self._writer2.write(disp)   # annotated version (all overlays)
-                        # log this frame's tracks against the EXACT video frame index
-                        # (0-based) -> tracks.csv aligns 1:1 with the recorded video
+                # OFFLOAD the (slow, CPU-only) video encode to the background thread so
+                # capture+tracking never wait on it. Increment + log the track index here
+                # (FIFO queue, drained on stop) so tracks.csv still aligns 1:1 to the video.
+                if self.recording and self._writer is not None:
+                    self._rec_frame += 1
+                    rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame.copy()
+                    try:
+                        self._rec_q.put((rec, disp.copy() if self._writer2 is not None else None),
+                                        timeout=2.0)
                         cb = self.on_recorded_frame
                         if cb is not None:
                             try:
                                 cb(self._rec_frame - 1)
                             except Exception:
                                 pass
-                preview = cv2.resize(disp, PREVIEW_SIZE)
-                self._brightness = float(preview.mean())   # live scene brightness 0..255
-                # cheap focus score (sharpness) on the preview centre — higher = sharper
-                pg = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
-                ph, pw = pg.shape
-                self._focus = float(cv2.Laplacian(
-                    pg[int(ph * .15):int(ph * .85), int(pw * .15):int(pw * .85)],
-                    cv2.CV_64F).var())
-                ok, buf = cv2.imencode(".jpg", preview,
-                                       [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-                if ok:
-                    now = time.perf_counter()
-                    dt = now - last
-                    last = now
-                    if dt > 0:
-                        self._fps_est = 0.9 * self._fps_est + 0.1 * (1.0 / dt)
-                    with self._cond:
-                        self._jpeg = buf.tobytes()
-                        self._frame = frame
-                        self._cond.notify_all()
+                    except queue.Full:
+                        self._rec_frame -= 1        # couldn't queue this frame -> not recorded
+                now = time.perf_counter()
+                dt = now - last
+                last = now
+                if dt > 0:
+                    self._fps_est = 0.9 * self._fps_est + 0.1 * (1.0 / dt)
+                self._frame = frame                 # keep latest_frame() fresh every capture
+                # PREVIEW jpeg is throttled — the browser doesn't need full frame-rate, and
+                # encoding it every frame was stealing time from tracking.
+                if now - self._last_preview >= 1.0 / max(1, self.preview_fps):
+                    self._last_preview = now
+                    preview = cv2.resize(disp, PREVIEW_SIZE)
+                    self._brightness = float(preview.mean())   # live scene brightness 0..255
+                    pg = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
+                    ph, pw = pg.shape
+                    self._focus = float(cv2.Laplacian(
+                        pg[int(ph * .15):int(ph * .85), int(pw * .15):int(pw * .85)],
+                        cv2.CV_64F).var())
+                    ok, buf = cv2.imencode(".jpg", preview,
+                                           [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                    if ok:
+                        with self._cond:
+                            self._jpeg = buf.tobytes()
+                            self._cond.notify_all()
                 if self.force_mock or not self.hw:
                     time.sleep(1.0 / max(self.fps, 1))
             except Exception:
                 time.sleep(0.05)
+
+    def _encoder_loop(self):
+        """Background thread: the ONLY place video frames are encoded/written. Runs the
+        writer under the same lock Stop uses, so releasing the writer can never race a
+        write (the old segfault). If the writer is gone, queued frames are dropped."""
+        while True:
+            try:
+                item = self._rec_q.get()
+            except Exception:
+                continue
+            if item is None:
+                continue
+            rec, disp = item
+            with self._rec_lock:
+                if self._writer is not None:
+                    try:
+                        self._writer.write(rec)
+                        if self._writer2 is not None and disp is not None:
+                            self._writer2.write(disp)
+                    except Exception:
+                        pass
 
     def set_overlay(self, **kw):
         for k, v in kw.items():
@@ -356,6 +390,11 @@ class Camera:
         d = directory or RECORDING_DIR
         os.makedirs(d, exist_ok=True)
         self.record_path = os.path.join(d, name)
+        while not self._rec_q.empty():          # clear any leftover frames from a prior run
+            try:
+                self._rec_q.get_nowait()
+            except Exception:
+                break
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         # Record at the ACTUAL processing rate, not the target fps — otherwise the
         # file plays back too fast (the loop runs slower than the camera fps).
@@ -382,6 +421,12 @@ class Camera:
             if not self.recording:
                 return ""
             self.recording = False
+        # let the encoder flush buffered frames before releasing the writers, so the
+        # tail of the recording (already logged in tracks.csv) actually gets written
+        t0 = time.time()
+        while not self._rec_q.empty() and time.time() - t0 < 3.0:
+            time.sleep(0.02)
+        with self._rec_lock:
             for wname in ("_writer", "_writer2"):
                 w = getattr(self, wname)
                 if w is not None:
