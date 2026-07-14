@@ -111,6 +111,7 @@
     <span id="zoomLbl">100%</span>
     <button onclick="zoomBy(0.1)" title="larger">A+</button>
     <button onclick="zoomReset()" title="reset">⟲</button>
+    <button onclick="quitApp()" title="stop the server / close the app" style="margin-left:8px;border-color:var(--red);color:#ff9a9d">⏻ Quit</button>
   </div>
 </header>
 
@@ -510,6 +511,16 @@ function applyZoom(){document.body.style.zoom=uiZoom;localStorage.setItem('flyzo
 function zoomBy(d){uiZoom=Math.min(2.5,Math.max(0.6,Math.round((uiZoom+d)*10)/10));applyZoom();}
 function zoomReset(){uiZoom=1;applyZoom();}
 applyZoom();
+let quitting=false;
+function quitApp(){
+  if(!confirm('Stop the FlyBox server? This ends the program on the Pi.\\n(Any running recording will be stopped and saved first.)'))return;
+  quitting=true;
+  post('/api/quit').catch(()=>{});
+  document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;'+
+    'flex-direction:column;gap:10px;color:#8a93a6;font:16px system-ui"><div style="font-size:40px">⏻</div>'+
+    '<div>FlyBox stopped. You can close this tab.</div>'+
+    '<div style="font-size:13px">To restart: <code>bash setup.sh run</code> on the Pi.</div></div>';
+}
 
 // opto
 function updateDuty(){const f=+$('freq').value,pw=+$('pw').value;const d=f>0?(pw/(1000/f)*100):100;
@@ -737,6 +748,7 @@ function updateMethodUI(){const m=$('method').value;
 let built=false, lastCamKey='';
 function proto1(p){return `${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.train_duration_s}s`;}
 async function refresh(){
+  if(quitting)return;
   let s;try{s=await fetch('/api/status').then(r=>r.json());}catch(e){return;}
   const badge=ok=>`<span class="badge ${ok?'ok':'mock'}"></span>`;
   const camLabel=s.camera.mock?'mock (test)':(s.camera.hw?(s.camera.sensor_model||'live'):'no camera');

@@ -106,3 +106,9 @@ LOG_TRACKS_HZ = 0               # 0 = every frame; else throttle tracks.csv writ
 # ---------------------------------------------------------------------------
 HOST = "0.0.0.0"   # all interfaces (LAN + AP mode)
 PORT = 8000
+
+# Auto-shutdown: if the browser closes and no client polls for this many seconds,
+# the server stops itself (no need to Ctrl+C the terminal). Kept generous so a page
+# refresh or a backgrounded tab won't trip it; never fires during a recording/session.
+# Set to 0 to disable and keep the server running until stopped manually.
+IDLE_SHUTDOWN_S = 90

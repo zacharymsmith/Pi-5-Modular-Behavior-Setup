@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import os
 import time
+import signal
+import threading
 from dataclasses import asdict
 
 from fastapi import FastAPI
@@ -206,9 +208,53 @@ def stream():
                              media_type="multipart/x-mixed-replace; boundary=frame")
 
 
+# --- auto-shutdown when the browser is gone (no more Ctrl+C hunting) --------
+# Every browser polls /api/status ~1/s; if that stops (tab/window closed) for
+# longer than the timeout, the server shuts itself down cleanly — unless a
+# recording/session/scheduler is running, which keeps it alive.
+_client = {"last": time.time(), "seen": False}
+
+
+def _shutdown_soon(delay=0.3):
+    def _later():
+        time.sleep(delay)
+        os.kill(os.getpid(), signal.SIGINT)   # same clean path as Ctrl+C (runs shutdown hooks)
+    threading.Thread(target=_later, daemon=True).start()
+
+
+def _idle_watchdog():
+    timeout = getattr(config, "IDLE_SHUTDOWN_S", 0)
+    if not timeout:
+        return
+    while True:
+        time.sleep(5)
+        if not _client["seen"]:
+            continue                                   # never auto-quit before a browser connects
+        if camera.recording or session.running or scheduler.running:
+            _client["last"] = time.time()              # stay alive during experiments
+            continue
+        if time.time() - _client["last"] > timeout:
+            _shutdown_soon(0)
+            return
+
+
+@app.on_event("startup")
+def _start_watchdog():
+    threading.Thread(target=_idle_watchdog, daemon=True).start()
+
+
+@app.post("/api/quit")
+def quit_app():
+    """Deliberate shutdown from the UI's Quit button — stops the terminal process."""
+    _shutdown_soon()
+    return {"ok": True, "message": "server stopping"}
+
+
 # --- status ----------------------------------------------------------------
 @app.get("/api/status")
 def status():
+    _client["last"] = time.time()      # heartbeat: browser is alive
+    _client["seen"] = True
     return {
         "camera": camera.status(),
         "opto": opto.state,
