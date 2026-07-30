@@ -208,6 +208,7 @@
         <div class="rowbtns" style="margin-top:10px">
           <button class="primary sm" onclick="autoExpose()">Auto-expose to arena</button>
           <button class="ghost sm" id="afBtn" style="display:none" onclick="autoFocus()">🎯 Autofocus now</button>
+          <button class="ghost sm" onclick="maxFps()">⚡ Max frame rate</button>
           <small class="hint" id="expInfo">meters brightness inside the arena ROI, then locks exposure+gain</small>
         </div>
         <label class="switch" id="afContWrap" style="display:none;margin-top:8px"><input type="checkbox" id="afCont" onchange="afContinuous()">
@@ -257,6 +258,15 @@
       <div class="inline"><small class="hint">fires channel:</small>
         <select id="proxChan" style="padding:6px" onchange="setProx()">
           <option value="blue">blue</option><option value="red">red</option></select>
+      </div>
+      <div class="inline" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+        <small class="hint">on interaction, hold light</small>
+        <input id="simInt" type="number" min="0" max="1" step="0.05" value="1" style="width:64px;padding:6px" title="intensity 0–1">
+        <small class="hint">for</small>
+        <input id="simSec" type="number" min="0.1" max="30" step="0.5" value="2" style="width:64px;padding:6px" title="seconds">
+        <small class="hint">s</small>
+        <button class="sm" onclick="applySimStim()">Apply</button>
+        <small class="hint" id="simInfo"></small>
       </div>
       <div class="statline" id="proxDiag">flies: 0 · min dist: —</div>
       <div class="inline" style="margin-top:8px"><small class="hint">calibration mm/px:</small>
@@ -323,6 +333,11 @@
         <small class="hint" id="duty">duty —</small>
       </div>
       <div class="statline" id="optoStat">idle</div>
+      <div class="divider"></div>
+      <label>Manual level — hold a channel ON at a steady intensity (constant, not pulsed)</label>
+      <div class="slider"><label>Red</label><input id="holdRed" type="range" min="0" max="1" step="0.02" value="0" oninput="holdOpto('red',this.value)"><span class="val" id="holdRedVal">off</span></div>
+      <div class="slider"><label>Blue</label><input id="holdBlue" type="range" min="0" max="1" step="0.02" value="0" oninput="holdOpto('blue',this.value)"><span class="val" id="holdBlueVal">off</span></div>
+      <small class="hint">Drag to raise/lower intensity; back to 0 = off. (Use ▶ Run above for pulse trains.)</small>
     </section>
 
     <section class="card">
@@ -532,6 +547,12 @@ function protoObj(){return{frequency_hz:+$('freq').value,pulse_width_ms:+$('pw')
 async function runOpto(){const r=await post('/api/opto/run',protoObj());if(!r.ok)$('optoStat').textContent='⚠ '+r.error;}
 function stopOpto(){post('/api/opto/stop');}
 function flashOpto(){post('/api/opto/flash',{channel:$('channel').value,intensity:+$('intensity').value,seconds:0.4});}
+function holdOpto(ch,v){v=+v;$( ch==='red'?'holdRedVal':'holdBlueVal').textContent=v>0?Math.round(v*100)+'%':'off';
+  post('/api/opto/hold',{channel:ch,intensity:v});}
+// interaction → constant light: set the proximity trigger protocol to "on for N s" (freq 0 = steady)
+function applySimStim(){const ch=$('proxChan').value,intn=+$('simInt').value,sec=+$('simSec').value;
+  post('/api/loop/protocol',{channel:ch,frequency_hz:0,pulse_width_ms:0,train_duration_s:sec,rest_s:0,n_bursts:1,intensity:intn})
+    .then(r=>{$('simInfo').textContent=r.ok?`✓ ${ch} on ${Math.round(intn*100)}% for ${sec}s when flies interact`:'failed';});}
 
 // tracking
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
@@ -605,6 +626,15 @@ function autoExpose(){$('expInfo').textContent='metering the arena…';
     if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
     $('expInfo').textContent=`locked ${r.exposure_us}µs · gain ${r.gain} · arena≈${r.measured}`+(r.metered_arena?'':' (whole frame — set an arena ROI)');
     built=false;refresh();});}
+function maxFps(){  // pick the highest-fps sensor mode + a short exposure that allows it
+  let best=null;
+  for(const o of $('camRes').options){const f=MODE_FPS[o.value]||30; if(!best||f>best.f)best={v:o.value,f:f};}
+  if(!best)return;
+  $('camRes').value=best.v; capFps(); $('camFps').value=best.f;
+  $('camAuto').checked=false; camAutoToggle();
+  $('camExp').value=Math.max(500, Math.round(1000000/best.f)-800);  // exposure < frame period
+  applyCam();
+  $('expInfo').textContent=`⚡ ${best.v} @ ${best.f}fps — short exposure, so add IR/white light and raise gain if dark`;}
 function autoFocus(){$('expInfo').textContent='autofocusing…';
   post('/api/camera/autofocus').then(r=>{
     $('expInfo').textContent=r.ok?`focus locked · lens ${r.lens_position} · sharpness ${r.focus}`:(r.error||'failed');});}
@@ -687,7 +717,8 @@ function rec(on){post(on?'/api/record/start':'/api/record/stop');}
 function fmtT(s){s=s||0;const m=Math.floor(s/60),x=s%60;return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
 function updateRecBar(cam){
   if(cam.recording){
-    $('recinfo').innerHTML=`<span class="dot" style="color:#e5484d">●</span> REC ${fmtT(cam.rec_elapsed)} · ${cam.record_fps||cam.fps} fps · ${(cam.path||'').split('/').pop()}${cam.annotated?' (+annotated)':''}`;
+    const be=cam.record_backend==='h264'?' · H.264 full-quality':'';
+    $('recinfo').innerHTML=`<span class="dot" style="color:#e5484d">●</span> REC ${fmtT(cam.rec_elapsed)} · ${cam.record_fps||cam.fps} fps${be} · ${(cam.path||'').split('/').pop()}${cam.annotated?' (+annotated)':''}`;
     $('recinfo').className='recbar live';
   } else {
     $('recinfo').textContent='● not recording'; $('recinfo').className='recbar';
@@ -766,6 +797,9 @@ async function refresh(){
     if(key!==lastCamKey){lastCamKey=key;pw.style.aspectRatio=cs[0]+' / '+cs[1];setTimeout(fit,60);}}
   $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
   $('optoStat').className='statline'+(s.opto.running?' on':'');
+  if(s.opto.hold){const H=s.opto.hold;
+    if(document.activeElement!==$('holdRed')){$('holdRed').value=H.red||0;$('holdRedVal').textContent=H.red>0?Math.round(H.red*100)+'%':'off';}
+    if(document.activeElement!==$('holdBlue')){$('holdBlue').value=H.blue||0;$('holdBlueVal').textContent=H.blue>0?Math.round(H.blue*100)+'%':'off';}}
   $('trackCount').textContent=s.tracker.count;
   const dh=s.tracker.det_health;
   if(dh==null){$('detHealth').textContent='—';$('detHealth').style.color='';$('detHealthHint').textContent='set Expected flies to monitor';}

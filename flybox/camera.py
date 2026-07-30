@@ -19,6 +19,7 @@ import cv2
 from config import (
     PROCESS_SIZE, PREVIEW_SIZE, CAMERA_FPS, JPEG_QUALITY, RECORDING_DIR,
     CAMERA_AUTO_EXPOSURE, CAMERA_EXPOSURE_US, CAMERA_GAIN,
+    RECORD_H264, RECORD_H264_MBPS,
 )
 
 try:
@@ -27,6 +28,21 @@ try:
 except Exception as e:  # pragma: no cover
     _HW_CAM = False
     _IMPORT_ERR = str(e)
+
+# picamera2's own H.264 encoder — records the full-res stream at real frame rate,
+# off the Python loop (the correct high-fps/high-quality path on the Pi 5).
+try:
+    from picamera2.encoders import H264Encoder
+    try:
+        from picamera2.outputs import FfmpegOutput as _VideoOutput   # muxes to .mp4
+        _H264_EXT = ".mp4"
+    except Exception:
+        from picamera2.outputs import FileOutput as _VideoOutput      # raw .h264 elementary stream
+        _H264_EXT = ".h264"
+    _HAVE_H264 = True
+except Exception:
+    _HAVE_H264 = False
+    _H264_EXT = ".mp4"
 
 
 class Camera:
@@ -51,6 +67,9 @@ class Camera:
         self.record_path = None
         self._writer = None
         self._writer2 = None            # optional annotated (overlays burned in) video
+        self._pi_recording = False      # True when picamera2's H.264 encoder is recording main
+        self._encoder = None
+        self.record_backend = "opencv"
         self.record_annotated = False
         self._rec_lock = threading.Lock()   # guards writer access across threads
         self.sensor_model = None        # e.g. "imx477" (HQ) or "imx708" (Cam Module 3) — auto-detected
@@ -241,23 +260,29 @@ class Camera:
                 disp = annotated
                 if ov:
                     disp = self._draw_overlay(annotated.copy(), recording=self.recording)
-                # OFFLOAD the (slow, CPU-only) video encode to the background thread so
-                # capture+tracking never wait on it. Increment + log the track index here
-                # (FIFO queue, drained on stop) so tracks.csv still aligns 1:1 to the video.
-                if self.recording and self._writer is not None:
+                # Recording. In H.264 mode picamera2's encoder writes the full-res main video
+                # off-thread; here we only push the optional annotated copy (and, in OpenCV
+                # fallback mode, the main video) to the background writer thread.
+                if self.recording:
                     self._rec_frame += 1
-                    rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame.copy()
-                    try:
-                        self._rec_q.put((rec, disp.copy() if self._writer2 is not None else None),
-                                        timeout=2.0)
+                    ok_frame = True
+                    if self._writer is not None or self._writer2 is not None:
+                        rec = None
+                        if self._writer is not None:   # OpenCV-mode main video
+                            rec = self._draw_overlay(frame.copy(), recording=True) if ov else frame.copy()
+                        try:
+                            self._rec_q.put((rec, disp.copy() if self._writer2 is not None else None),
+                                            timeout=2.0)
+                        except queue.Full:
+                            self._rec_frame -= 1
+                            ok_frame = False
+                    if ok_frame:
                         cb = self.on_recorded_frame
                         if cb is not None:
                             try:
                                 cb(self._rec_frame - 1)
                             except Exception:
                                 pass
-                    except queue.Full:
-                        self._rec_frame -= 1        # couldn't queue this frame -> not recorded
                 now = time.perf_counter()
                 dt = now - last
                 last = now
@@ -265,8 +290,10 @@ class Camera:
                     self._fps_est = 0.9 * self._fps_est + 0.1 * (1.0 / dt)
                 self._frame = frame                 # keep latest_frame() fresh every capture
                 # PREVIEW jpeg is throttled — the browser doesn't need full frame-rate, and
-                # encoding it every frame was stealing time from tracking.
-                if now - self._last_preview >= 1.0 / max(1, self.preview_fps):
+                # encoding it every frame steals time from tracking/encoding. Throttle it
+                # harder while recording (the preview is "nice to have" during a run).
+                pf = 6 if self.recording else max(1, self.preview_fps)
+                if now - self._last_preview >= 1.0 / pf:
                     self._last_preview = now
                     preview = cv2.resize(disp, PREVIEW_SIZE)
                     self._brightness = float(preview.mean())   # live scene brightness 0..255
@@ -300,13 +327,13 @@ class Camera:
                 continue
             rec, disp = item
             with self._rec_lock:
-                if self._writer is not None:
-                    try:
+                try:
+                    if self._writer is not None and rec is not None:
                         self._writer.write(rec)
-                        if self._writer2 is not None and disp is not None:
-                            self._writer2.write(disp)
-                    except Exception:
-                        pass
+                    if self._writer2 is not None and disp is not None:
+                        self._writer2.write(disp)
+                except Exception:
+                    pass
 
     def set_overlay(self, **kw):
         for k, v in kw.items():
@@ -456,30 +483,68 @@ class Camera:
             return {"ok": False, "error": str(e)}
 
     # ---- recording -----------------------------------------------------
+    def _bitrate(self) -> int:
+        if RECORD_H264_MBPS and RECORD_H264_MBPS > 0:
+            return int(RECORD_H264_MBPS * 1_000_000)
+        w, h = self.size
+        return int(min(30_000_000, max(4_000_000, w * h * max(self.fps, 15) * 0.12)))
+
     def start_recording(self, tag: str = "", directory: str | None = None) -> str | None:
         if self.recording:
             return "Already recording."
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{ts}{('_' + tag) if tag else ''}.mp4"
+        stem = f"{ts}{('_' + tag) if tag else ''}"
         d = directory or RECORDING_DIR
         os.makedirs(d, exist_ok=True)
-        self.record_path = os.path.join(d, name)
         while not self._rec_q.empty():          # clear any leftover frames from a prior run
             try:
                 self._rec_q.get_nowait()
             except Exception:
                 break
+        self._writer = self._writer2 = None
+        self._pi_recording = False
+        self._encoder = None
+
+        # --- preferred: picamera2 H.264 encoder (full-res, full-fps, off the loop) ---
+        if RECORD_H264 and _HAVE_H264 and self.hw and self._cam is not None and not self.force_mock:
+            try:
+                self.record_path = os.path.join(d, stem + _H264_EXT)
+                self._encoder = H264Encoder(bitrate=self._bitrate())
+                self._cam.start_encoder(self._encoder, _VideoOutput(self.record_path))
+                self.record_backend = "h264"
+                self._pi_recording = True
+                self._record_fps = self.fps
+                # optional annotated preview copy still via the OpenCV writer thread
+                if self.record_annotated:
+                    apath = os.path.join(d, stem + "_annotated.mp4")
+                    w2 = cv2.VideoWriter(apath, cv2.VideoWriter_fourcc(*"mp4v"),
+                                         round(self._fps_est, 1) or self.fps, tuple(self.size))
+                    self._writer2 = w2 if w2.isOpened() else None
+                self._rec_frame = 0
+                self._rec_t0 = time.time()
+                self.recording = True
+                return None
+            except Exception as e:
+                # clean up and fall back to the OpenCV writer below
+                try:
+                    self._cam.stop_encoder()
+                except Exception:
+                    pass
+                self._pi_recording = False
+                self._encoder = None
+                self.message = f"H.264 encoder unavailable ({e}); recording with OpenCV"
+
+        # --- fallback: OpenCV writer (known-good on any setup) ---
+        self.record_path = os.path.join(d, stem + ".mp4")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        # Record at the ACTUAL processing rate, not the target fps — otherwise the
-        # file plays back too fast (the loop runs slower than the camera fps).
         rec_fps = round(self._fps_est, 1) if self._fps_est > 1 else self.fps
         self._record_fps = rec_fps
+        self.record_backend = "opencv"
         with self._rec_lock:
             self._writer = cv2.VideoWriter(self.record_path, fourcc, rec_fps, tuple(self.size))
             if not self._writer.isOpened():
                 self._writer = None
                 return "Could not open the video writer (codec missing?)."
-            self._writer2 = None
             if self.record_annotated:
                 apath = self.record_path[:-4] + "_annotated.mp4"
                 self._writer2 = cv2.VideoWriter(apath, fourcc, rec_fps, tuple(self.size))
@@ -495,8 +560,15 @@ class Camera:
             if not self.recording:
                 return ""
             self.recording = False
-        # let the encoder flush buffered frames before releasing the writers, so the
-        # tail of the recording (already logged in tracks.csv) actually gets written
+        # stop the picamera2 H.264 encoder (leaves the camera running for preview)
+        if self._pi_recording:
+            try:
+                self._cam.stop_encoder()
+            except Exception:
+                pass
+            self._pi_recording = False
+            self._encoder = None
+        # let the OpenCV encoder thread flush buffered frames before releasing writers
         t0 = time.time()
         while not self._rec_q.empty() and time.time() - t0 < 3.0:
             time.sleep(0.02)
@@ -521,6 +593,7 @@ class Camera:
             "path": self.record_path,
             "rec_elapsed": round(time.time() - self._rec_t0, 0) if self.recording else 0,
             "record_fps": self._record_fps,
+            "record_backend": self.record_backend,
             "annotated": self._writer2 is not None,
             "fps": round(self._fps_est, 1),
             "size": list(self.size),

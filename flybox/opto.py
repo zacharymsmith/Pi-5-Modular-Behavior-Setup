@@ -63,6 +63,20 @@ class _Chan:
 class OptoController:
     def __init__(self):
         self._chan = {name: _Chan() for name in OPTO_CHANNELS}
+        self._hold = {name: 0.0 for name in OPTO_CHANNELS}   # manual constant-on level per channel
+
+    def hold(self, channel: str, intensity: float) -> str | None:
+        """Turn a channel ON at a steady PWM level and keep it there (manual control).
+        intensity 0 = off. Blocked while a pulse protocol is running on that channel."""
+        if channel not in OPTO_CHANNELS:
+            return f"Unknown channel '{channel}'."
+        if self.is_running(channel):
+            return f"{channel} is running a protocol — stop it first."
+        lvl = max(0.0, min(OPTO_MAX_INTENSITY, float(intensity)))
+        pca.set(OPTO_CHANNELS[channel], lvl)
+        self._hold[channel] = lvl
+        self._chan[channel].message = (f"holding {int(round(lvl * 100))}%" if lvl > 0 else "idle")
+        return None
 
     # ---- public API ----------------------------------------------------
     def run(self, proto: Protocol) -> str | None:
@@ -104,6 +118,7 @@ class OptoController:
             c = self._chan[n]
             c.stop.set()
             pca.set(OPTO_CHANNELS[n], 0.0)
+            self._hold[n] = 0.0
             c.running = False
             c.message = "stopped"
 
@@ -115,12 +130,14 @@ class OptoController:
         chans = {n: {"running": c.running, "message": c.message}
                  for n, c in self._chan.items()}
         running = [n for n, c in self._chan.items() if c.running]
+        held = [n for n, v in self._hold.items() if v > 0]
         return {
             "hw": pca.hw,
-            "running": bool(running),
+            "running": bool(running or held),
             "message": ("; ".join(f"{n}: {self._chan[n].message}" for n in running)
-                        if running else "idle"),
+                        if running else (f"holding {', '.join(held)}" if held else "idle")),
             "channels": chans,
+            "hold": dict(self._hold),
         }
 
     # ---- worker --------------------------------------------------------

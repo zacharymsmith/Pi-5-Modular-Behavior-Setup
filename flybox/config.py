@@ -40,6 +40,12 @@ PREVIEW_SIZE = (640, 480)       # downscaled JPEG sent to the browser
 CAMERA_FPS = 30
 JPEG_QUALITY = 80
 RECORDING_DIR = "recordings"    # created under the app folder
+# Recording backend. "h264" uses picamera2's own (efficient, off-thread) H.264 encoder to
+# write the full-resolution video at the camera's real frame rate — the way to record
+# high-fps/high-quality on the Pi 5 (which has no hardware encoder for OpenCV to use).
+# Falls back automatically to the OpenCV writer if picamera2/ffmpeg isn't available.
+RECORD_H264 = True
+RECORD_H264_MBPS = 0            # 0 = auto bitrate from resolution×fps; else fixed Mbps
 # Exposure/gain defaults (picamera2 controls). auto=True lets the camera decide.
 CAMERA_AUTO_EXPOSURE = True
 CAMERA_EXPOSURE_US = 8000       # microseconds, used when auto is off

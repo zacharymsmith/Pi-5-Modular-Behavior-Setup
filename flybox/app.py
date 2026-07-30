@@ -297,6 +297,18 @@ def opto_flash(f: FlashIn):
     return {"ok": err is None, "error": err}
 
 
+class HoldIn(BaseModel):
+    channel: str = "red"
+    intensity: float = 0.0
+
+
+@app.post("/api/opto/hold")
+def opto_hold(h: HoldIn):
+    """Manual constant-on: hold a channel at a steady level (0 = off)."""
+    err = opto.hold(h.channel, h.intensity)
+    return {"ok": err is None, "error": err, "opto": opto.state}
+
+
 # --- illumination ----------------------------------------------------------
 @app.post("/api/light")
 def set_light(l: LightIn):
