@@ -34,16 +34,12 @@ except Exception as e:  # pragma: no cover
 # off the Python loop (the correct high-fps/high-quality path on the Pi 5).
 try:
     from picamera2.encoders import H264Encoder
-    try:
-        from picamera2.outputs import FfmpegOutput as _VideoOutput   # muxes to .mp4
-        _H264_EXT = ".mp4"
-    except Exception:
-        from picamera2.outputs import FileOutput as _VideoOutput      # raw .h264 elementary stream
-        _H264_EXT = ".h264"
-    _HAVE_H264 = True
+    from picamera2.outputs import FileOutput as _VideoOutput          # raw .h264 elementary stream:
+    _HAVE_H264 = True                                                 # ALWAYS playable even if the
+    _H264_EXT = ".h264"                                               # process is killed mid-recording
 except Exception:
     _HAVE_H264 = False
-    _H264_EXT = ".mp4"
+    _H264_EXT = ".h264"
 
 
 class Camera:
@@ -618,6 +614,35 @@ class Camera:
             self.recording = True
         return None
 
+    def _remux_h264(self, h264_path, dur):
+        """Wrap the raw .h264 into an .mp4 (no re-encode) at the true average frame rate.
+        Best-effort: on any failure the original .h264 is kept (still fully playable)."""
+        import subprocess
+        mp4 = h264_path[:-5] + ".mp4"
+        fps, n = self.fps, 0
+        try:
+            r = subprocess.run(
+                ["ffprobe", "-v", "0", "-select_streams", "v", "-count_packets",
+                 "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", h264_path],
+                capture_output=True, text=True, timeout=60)
+            n = int((r.stdout or "0").strip() or 0)
+            if n > 1 and dur > 0.5:
+                fps = round(n / dur, 2)
+        except Exception:
+            pass
+        try:
+            subprocess.run(["ffmpeg", "-y", "-r", str(fps), "-i", h264_path, "-c", "copy", mp4],
+                           capture_output=True, timeout=600)
+            if os.path.exists(mp4) and os.path.getsize(mp4) > 1000:
+                try:
+                    os.remove(h264_path)
+                except Exception:
+                    pass
+                return mp4, fps, n
+        except Exception:
+            pass
+        return h264_path, fps, n    # remux unavailable/failed -> the .h264 is still playable
+
     def stop_recording(self) -> str:
         with self._rec_lock:
             if not self.recording:
@@ -631,6 +656,16 @@ class Camera:
                 pass
             self._pi_recording = False
             self._encoder = None
+            # remux the crash-proof raw .h264 into a .mp4 for convenience (keeps the .h264
+            # if ffmpeg is missing/fails, so a recording is NEVER lost)
+            if self.record_path and self.record_path.endswith(".h264"):
+                dur = max(0.1, time.time() - self._rec_t0)
+                newp, fps, n = self._remux_h264(self.record_path, dur)
+                self.record_path = newp
+                if fps:
+                    self._record_fps = fps
+                if n > 1:
+                    self._last_rec = f"last recording: {n} frames = {fps} fps"
         # let the OpenCV encoder thread flush buffered frames before releasing writers
         t0 = time.time()
         while not self._rec_q.empty() and time.time() - t0 < 3.0:
