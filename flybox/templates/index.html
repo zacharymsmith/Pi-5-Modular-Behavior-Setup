@@ -240,47 +240,55 @@
   <div class="cols">
     <section class="card">
       <h2>Closed-loop stimulation</h2>
-      <p class="sub">Zones and proximity are evaluated every frame; red and blue fire independently.</p>
-      <label class="switch"><input type="checkbox" id="loopEn" onchange="setLoop()">
-        <span class="track"><span class="knob"></span></span> Arm closed loop</label>
-      <div class="slider" style="margin-top:12px">
+      <p class="sub">Fire the LEDs automatically from what the flies do — red and blue independently.</p>
+      <div class="inline" style="justify-content:space-between;align-items:center">
+        <label class="switch"><input type="checkbox" id="loopEn" onchange="setLoop()">
+          <span class="track"><span class="knob"></span></span> Arm closed loop</label>
+        <small class="hint">fires: <b id="loopFires" style="color:var(--fg)">0</b> · last <b id="loopLast" style="color:var(--fg)">—</b></small>
+      </div>
+      <div class="slider" style="margin-top:10px">
         <label>Cooldown</label><input id="cooldown" type="range" min="0" max="10" step="0.5" value="2" oninput="setLoop()">
         <span class="val" id="cooldownVal">2 s</span>
       </div>
 
-      <div class="divider"></div>
-      <label class="switch"><input type="checkbox" id="proxEn" onchange="setProx()">
-        <span class="track"><span class="knob"></span></span> Proximity trigger (flies within distance)</label>
-      <div class="slider" style="margin-top:10px">
-        <label>Distance</label><input id="proxDist" type="range" min="5" max="400" value="80" oninput="setProx()">
-        <span class="val" id="proxDistVal">80 px</span>
-      </div>
-      <div class="inline"><small class="hint">fires channel:</small>
-        <select id="proxChan" style="padding:6px" onchange="setProx()">
-          <option value="blue">blue</option><option value="red">red</option></select>
-      </div>
-      <div class="inline" style="gap:8px;margin-top:8px;flex-wrap:wrap">
-        <small class="hint">on interaction, hold light</small>
-        <input id="simInt" type="number" min="0" max="1" step="0.05" value="1" style="width:64px;padding:6px" title="intensity 0–1">
-        <small class="hint">for</small>
-        <input id="simSec" type="number" min="0.1" max="30" step="0.5" value="2" style="width:64px;padding:6px" title="seconds">
-        <small class="hint">s</small>
-        <button class="sm" onclick="applySimStim()">Apply</button>
-        <small class="hint" id="simInfo"></small>
-      </div>
-      <div class="statline" id="proxDiag">flies: 0 · min dist: —</div>
-      <div class="inline" style="margin-top:8px"><small class="hint">calibration mm/px:</small>
-        <input id="mmpp" type="number" step="0.001" placeholder="e.g. 0.12" style="width:110px;padding:6px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
-        <button class="sm" onclick="setCalib()">Set</button>
-        <small class="hint" id="calibInfo"></small>
+      <!-- INTERACTION trigger — everything about it in one tight group -->
+      <div class="drawtools">
+        <label class="switch"><input type="checkbox" id="proxEn" onchange="setProx()">
+          <span class="track"><span class="knob"></span></span> Interaction trigger — when flies come within a distance</label>
+        <div class="slider" style="margin-top:8px">
+          <label>Distance</label><input id="proxDist" type="range" min="5" max="400" value="80" oninput="setProx()">
+          <span class="val" id="proxDistVal">80 px</span>
+        </div>
+        <div class="inline" style="gap:8px;margin-top:6px">
+          <small class="hint">fire</small>
+          <select id="proxChan" style="width:auto;padding:6px" onchange="setProx();applySimStim()">
+            <option value="red">red</option><option value="blue">blue</option></select>
+        </div>
+        <div class="slider" style="margin-top:6px">
+          <label>Intensity</label><input id="simInt" type="range" min="0" max="100" value="40" oninput="applySimStim()">
+          <span class="val" id="simIntVal">40%</span>
+        </div>
+        <div class="inline" style="gap:8px">
+          <small class="hint">for</small>
+          <input id="simSec" type="number" min="0.1" max="30" step="0.5" value="2" style="width:60px;padding:6px" onchange="applySimStim()">
+          <small class="hint">seconds</small>
+          <small class="hint" id="simInfo"></small>
+        </div>
+        <small class="hint">Lower intensity = gentler flash, so the red is less likely to wash out tracking. Drag it while running to tune live.</small>
+        <div class="statline" id="proxDiag" style="margin-top:6px">flies: 0 · min dist: —</div>
       </div>
 
-      <div class="divider"></div>
-      <div class="kv"><span>red fires</span><b id="protoRed">—</b></div>
-      <div class="kv"><span>blue fires</span><b id="protoBlue">—</b></div>
-      <div class="rowbtns"><button class="sm" onclick="setTriggerProto()">Set trigger protocol from opto panel →</button></div>
-      <div class="kv" style="margin-top:8px"><span>Fires this session</span><b id="loopFires">0</b></div>
-      <div class="kv"><span>Last fire</span><b id="loopLast">—</b></div>
+      <details style="margin-top:10px">
+        <summary>Zone triggers &amp; calibration</summary>
+        <div class="kv" style="margin-top:8px"><span>zone trigger · red</span><b id="protoRed">—</b></div>
+        <div class="kv"><span>zone trigger · blue</span><b id="protoBlue">—</b></div>
+        <div class="rowbtns"><button class="sm" onclick="setTriggerProto()">Use opto-panel protocol for zone triggers →</button></div>
+        <div class="inline" style="margin-top:10px"><small class="hint">calibration mm/px:</small>
+          <input id="mmpp" type="number" step="0.001" placeholder="e.g. 0.12" style="width:90px;padding:6px;background:#0e131c;border:1px solid var(--line);border-radius:8px;color:var(--fg)">
+          <button class="sm" onclick="setCalib()">Set</button>
+          <small class="hint" id="calibInfo"></small>
+        </div>
+      </details>
     </section>
 
     <section class="card">
@@ -549,10 +557,11 @@ function stopOpto(){post('/api/opto/stop');}
 function flashOpto(){post('/api/opto/flash',{channel:$('channel').value,intensity:+$('intensity').value,seconds:0.4});}
 function holdOpto(ch,v){v=+v;$( ch==='red'?'holdRedVal':'holdBlueVal').textContent=v>0?Math.round(v*100)+'%':'off';
   post('/api/opto/hold',{channel:ch,intensity:v});}
-// interaction → constant light: set the proximity trigger protocol to "on for N s" (freq 0 = steady)
-function applySimStim(){const ch=$('proxChan').value,intn=+$('simInt').value,sec=+$('simSec').value;
+// interaction → light at a chosen PWM intensity for N s (freq 0 = steady, not pulsed)
+function applySimStim(){const ch=$('proxChan').value,intn=+$('simInt').value/100,sec=+$('simSec').value;
+  $('simIntVal').textContent=Math.round(intn*100)+'%';
   post('/api/loop/protocol',{channel:ch,frequency_hz:0,pulse_width_ms:0,train_duration_s:sec,rest_s:0,n_bursts:1,intensity:intn})
-    .then(r=>{$('simInfo').textContent=r.ok?`✓ ${ch} on ${Math.round(intn*100)}% for ${sec}s when flies interact`:'failed';});}
+    .then(r=>{$('simInfo').textContent=r.ok?`✓ ${ch} ${Math.round(intn*100)}% for ${sec}s`:'failed';});}
 
 // tracking
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
@@ -862,6 +871,12 @@ async function refresh(){
     $('proxEn').checked=s.loop.proximity.enabled;
     $('proxDist').value=s.loop.proximity.distance_px;$('proxDistVal').textContent=s.loop.proximity.distance_px+' px';
     $('proxChan').value=s.loop.proximity.channel;
+    // reflect the trigger channel's actual intensity/duration in the interaction sliders
+    const _pp=s.loop.protocols&&s.loop.protocols[s.loop.proximity.channel];
+    if(_pp){
+      if(document.activeElement!==$('simInt')){const pct=Math.round((_pp.intensity||0)*100);$('simInt').value=pct;$('simIntVal').textContent=pct+'%';}
+      if(document.activeElement!==$('simSec')&&_pp.train_duration_s!=null)$('simSec').value=_pp.train_duration_s;
+    }
     $('mockEn').checked=s.camera.mock;
     // tracking
     $('trackEn').checked=s.tracker.enabled;
