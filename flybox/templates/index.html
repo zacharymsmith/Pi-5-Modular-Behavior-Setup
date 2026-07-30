@@ -142,6 +142,7 @@
             <button type="button" data-v="ellipse" class="on">◯ Ellipse</button>
             <button type="button" data-v="rect">▭ Rectangle</button>
           </div>
+          <button class="primary sm" onclick="autoArena()">◎ Auto-fit dish</button>
           <button class="ghost sm" onclick="clearArena()">Clear arena</button>
           <button class="ghost sm" onclick="clearZones()">Clear zones</button>
         </div>
@@ -266,8 +267,8 @@
             <option value="red">red</option><option value="blue">blue</option></select>
         </div>
         <div class="slider" style="margin-top:6px">
-          <label>Intensity</label><input id="simInt" type="range" min="0" max="100" value="40" oninput="applySimStim()">
-          <span class="val" id="simIntVal">40%</span>
+          <label>Intensity</label><input id="simInt" type="range" min="0" max="100" value="5" oninput="applySimStim()">
+          <span class="val" id="simIntVal">5%</span>
         </div>
         <label class="switch" style="margin-top:6px"><input type="checkbox" id="proxSustain" checked onchange="setProx()">
           <span class="track"><span class="knob"></span></span> Stay on while they're close (vs. flash for a set time)</label>
@@ -790,6 +791,8 @@ cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2
   if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
   else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
 function clearArena(){post('/api/track/roi/clear').then(refresh);}
+function autoArena(){$('drawHint').textContent='detecting the dish…';
+  post('/api/track/roi/auto').then(r=>{$('drawHint').textContent=r.ok?'arena auto-fit to the dish ✓ (drag to fine-tune)':(r.error||'failed');refresh();});}
 function toggleWide(){const pw=document.querySelector('.previewWrap');
   const fs=document.fullscreenElement||document.webkitFullscreenElement;
   if(!fs){ (pw.requestFullscreen||pw.webkitRequestFullscreen).call(pw); }

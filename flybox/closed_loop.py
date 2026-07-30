@@ -29,8 +29,10 @@ _TRAIL_COLORS = [(0, 230, 0), (0, 200, 255), (255, 160, 0), (255, 80, 200),
 
 
 def _default_protocol(channel):
-    return Protocol(channel=channel, frequency_hz=20, pulse_width_ms=10,
-                    train_duration_s=1.0, rest_s=0.0, n_bursts=1)
+    # closed-loop trigger fires at a GENTLE 5% by default so the light doesn't wash out
+    # tracking; raise it per-assay with the interaction Intensity slider.
+    return Protocol(channel=channel, frequency_hz=0, pulse_width_ms=10,
+                    train_duration_s=2.0, rest_s=0.0, n_bursts=1, intensity=0.05)
 
 
 class ClosedLoop:

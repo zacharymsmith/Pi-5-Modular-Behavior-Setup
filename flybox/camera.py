@@ -171,8 +171,8 @@ class Camera:
             main = tuple(self.size)
             # a small lores stream drives tracking + preview so the recorder can own the
             # full-res main stream alone (no capture/encode contention -> fps holds up)
-            lw = min(800, main[0]); lw -= lw % 2
-            lh = int(round(lw * main[1] / main[0])); lh -= lh % 2
+            lw = max(64, (min(832, main[0]) // 64) * 64)   # multiple of 64 avoids the stride
+            lh = int(round(lw * main[1] / main[0])); lh -= lh % 2   # padding that shows as a green edge
             self._lores_size = (lw, lh)
             self._has_lores = False
             try:
@@ -275,7 +275,11 @@ class Camera:
         if self._has_lores:
             try:
                 yuv = self._cam.capture_array("lores")      # small stream -> cheap tracking
-                return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+                bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+                if self._lores_size:                        # trim any alignment padding (green edge)
+                    lw, lh = self._lores_size
+                    bgr = bgr[:lh, :lw]
+                return bgr
             except Exception:
                 self._has_lores = False                     # conversion/format issue -> use main
         return self._cam.capture_array("main")

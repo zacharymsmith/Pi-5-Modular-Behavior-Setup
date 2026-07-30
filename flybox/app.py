@@ -415,6 +415,14 @@ def clear_arena():
     return {"ok": True}
 
 
+@app.post("/api/track/roi/auto")
+def auto_arena():
+    frame = camera.latest_frame()
+    if frame is None:
+        return {"ok": False, "error": "no camera frame yet"}
+    return tracker.auto_arena(frame)
+
+
 class BuildBgIn(BaseModel):
     seconds: float = 3.0
 

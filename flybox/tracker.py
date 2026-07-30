@@ -153,6 +153,31 @@ class Tracker:
         self.roi = dict(DEFAULT_ROI)   # revert to the default centred ellipse (never the corners)
         self._mask = None
 
+    def auto_arena(self, frame_bgr):
+        """One-click arena: auto-detect the round dish (Hough circle) and set the arena
+        ellipse to it, so the user doesn't have to draw it by hand."""
+        g = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), (9, 9), 2)
+        h, w = g.shape
+        best = None
+        try:
+            circles = cv2.HoughCircles(
+                g, cv2.HOUGH_GRADIENT, dp=1.2, minDist=w,
+                param1=120, param2=40,
+                minRadius=int(min(w, h) * 0.18), maxRadius=int(min(w, h) * 0.5))
+            if circles is not None:
+                cc = min(circles[0], key=lambda c: (c[0] - w / 2) ** 2 + (c[1] - h / 2) ** 2)
+                best = (float(cc[0]), float(cc[1]), float(cc[2]))
+        except Exception:
+            pass
+        if best is None:
+            return {"ok": False, "error": "couldn't find a round dish — draw the arena by hand"}
+        cx, cy, r = best
+        r *= 0.97                       # inset so the bright rim isn't included
+        x1, y1 = max(0.0, (cx - r) / w), max(0.0, (cy - r) / h)
+        x2, y2 = min(1.0, (cx + r) / w), min(1.0, (cy + r) / h)
+        self.set_arena(x1, y1, x2, y2, "ellipse")
+        return {"ok": True, "roi": self.roi}
+
     def _roi_px(self, w, h):
         r = self.roi
         return (int(r["x1"] * w), int(r["y1"] * h), int(r["x2"] * w), int(r["y2"] * h))
