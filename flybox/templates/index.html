@@ -639,17 +639,22 @@ function autoExpose(){$('expInfo').textContent='metering the arena…';
     if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
     $('expInfo').textContent=`locked ${r.exposure_us}µs · gain ${r.gain} · arena≈${r.measured}`+(r.metered_arena?'':' (whole frame — set an arena ROI)');
     built=false;refresh();});}
-function maxFps(){  // pick the highest-fps sensor mode + a short exposure + boosted gain
-  let best=null;
-  for(const o of $('camRes').options){const f=MODE_FPS[o.value]||30; if(!best||f>best.f)best={v:o.value,f:f};}
-  if(!best)return;
-  $('camRes').value=best.v; capFps(); $('camFps').value=best.f;
+function maxFps(){  // encode-friendly resolution (Pi 5 software H.264 keeps up better at a
+  // smaller frame) + short exposure + gain. The sensor still runs fast; the smaller frame
+  // is what lets the encoder actually reach a high fps.
+  const prefer=['800x600','1024x768','640x480'];
+  let v=[...$('camRes').options].map(o=>o.value).find(x=>prefer.includes(x));
+  if(!v){let best=null; for(const o of $('camRes').options){const w=+o.value.split('x')[0]; if(!best||w<best.w)best={v:o.value,w};} v=best&&best.v;}
+  if(!v)return;
+  $('camRes').value=v; capFps();
+  const target=Math.min(90, MODE_FPS[v]||60);
+  $('camFps').value=target;
   $('camAuto').checked=false; camAutoToggle();
-  const exp=Math.max(500, Math.round(1000000/best.f)-600);   // exposure must be < frame period
+  const exp=Math.max(500, Math.round(1000000/target)-600);
   $('camExp').value=exp;
-  $('camGain').value=Math.min(16,Math.max(+$('camGain').value||1, 8)); // short exposure = dark -> gain up
+  $('camGain').value=Math.min(16,Math.max(+$('camGain').value||1, 8));
   applyCam();
-  $('expInfo').textContent=`⚡ ${best.v} @ ${best.f}fps · exposure ${exp}µs — add IR light; if too dark, raise gain more`;}
+  $('expInfo').textContent=`⚡ ${v} @ ${target}fps target · exp ${exp}µs — smaller frame so the encoder keeps up. Do a 10s test, then read the real fps below.`;}
 function autoFocus(){$('expInfo').textContent='autofocusing…';
   post('/api/camera/autofocus').then(r=>{
     $('expInfo').textContent=r.ok?`focus locked · lens ${r.lens_position} · sharpness ${r.focus}`:(r.error||'failed');});}
@@ -738,7 +743,8 @@ function updateRecBar(cam){
     $('recinfo').innerHTML=`<span class="dot" style="color:#e5484d">●</span> REC ${fmtT(cam.rec_elapsed)} · ${cam.record_fps||cam.fps} fps${be} · ${(cam.path||'').split('/').pop()}${cam.annotated?' (+annotated)':''}`;
     $('recinfo').className='recbar live';
   } else {
-    $('recinfo').textContent='● not recording'; $('recinfo').className='recbar';
+    $('recinfo').innerHTML='● not recording'+(cam.last_rec?` &middot; <span style="color:var(--green)">${cam.last_rec}</span>`:'');
+    $('recinfo').className='recbar';
   }}
 function retryCam(){post('/api/camera/retry').then(refresh);}
 function setMock(){post('/api/camera/mock',{enabled:$('mockEn').checked});}

@@ -94,6 +94,7 @@ class Camera:
         self._rec_frame = 0
         self._rec_t0 = 0.0
         self._eff_exposure = int(CAMERA_EXPOSURE_US)
+        self._last_rec = ""             # "last recording: N frames … = X fps" (ground truth)
         self._has_lores = False         # lores stream for tracking/preview (frees the
         self._lores_size = None         # full-res main stream for the recorder = no fps drop)
         # configurable info overlay burned into the video (NOT the tracking markers)
@@ -175,14 +176,14 @@ class Camera:
                 cfg = cam.create_video_configuration(
                     main={"size": main, "format": "RGB888"},
                     lores={"size": self._lores_size, "format": "YUV420"},
-                    controls=self._cam_controls())
+                    controls=self._cam_controls(), buffer_count=6)
                 cam.configure(cfg)
                 cam.start()
                 self._has_lores = True
             except Exception:                            # some modes reject lores -> main only
-                cam.stop() if False else None
                 cfg = cam.create_video_configuration(
-                    main={"size": main, "format": "RGB888"}, controls=self._cam_controls())
+                    main={"size": main, "format": "RGB888"},
+                    controls=self._cam_controls(), buffer_count=6)
                 cam.configure(cfg)
                 cam.start()
                 self._has_lores = False
@@ -620,6 +621,20 @@ class Camera:
                     except Exception:
                         pass
                     setattr(self, wname, None)
+        # ground truth: probe the finished file for the ACTUAL recorded fps (the Pi 5
+        # software encoder can't always hit the requested rate; the preview fps is NOT
+        # the recording fps). frames ÷ recording seconds = the real average fps.
+        dur = max(0.1, time.time() - self._rec_t0)
+        try:
+            cap = cv2.VideoCapture(self.record_path)
+            n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.release()
+            if n > 1:
+                real = round(n / dur, 1)
+                self._record_fps = real
+                self._last_rec = f"last recording: {n} frames in {int(dur)}s = {real} fps"
+        except Exception:
+            pass
         return self.record_path or ""
 
     def status(self):
@@ -635,6 +650,7 @@ class Camera:
             "record_backend": self.record_backend,
             "exposure_effective_us": self._eff_exposure,
             "has_lores": self._has_lores,
+            "last_rec": self._last_rec,
             "annotated": self._writer2 is not None,
             "fps": round(self._fps_est, 1),
             "size": list(self.size),
