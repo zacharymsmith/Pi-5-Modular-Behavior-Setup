@@ -63,6 +63,7 @@ class Camera:
         self._cond = threading.Condition()
         self._jpeg = None
         self._frame = None
+        self._annotated = None          # latest tracked/overlaid frame from the tracking thread
         self._fps_est = 0.0
         self.recording = False
         self.record_path = None
@@ -106,6 +107,8 @@ class Camera:
         self._open()
         self._enc_t = threading.Thread(target=self._encoder_loop, daemon=True)
         self._enc_t.start()
+        self._track_t = threading.Thread(target=self._track_loop, daemon=True)
+        self._track_t.start()
         self._t = threading.Thread(target=self._loop, daemon=True)
         self._t.start()
 
@@ -285,14 +288,12 @@ class Camera:
                 if frame is None:
                     time.sleep(0.01)
                     continue
-                annotated = frame
-                if self.frame_cb is not None:
-                    try:
-                        annotated = self.frame_cb(frame)
-                    except Exception:
-                        annotated = frame
+                self._frame = frame          # publish immediately for the tracking thread
+                # tracking runs in its OWN thread (below) so it never slows this capture
+                # loop, which feeds the recorder — the overlay markers come from there.
+                ann = self._annotated
+                annotated = ann if ann is not None else frame
                 ov = self.overlay.get("enabled")
-                # display / annotated frame = tracking markers + info overlay
                 disp = annotated
                 if ov:
                     disp = self._draw_overlay(annotated.copy(), recording=self.recording)
@@ -324,7 +325,6 @@ class Camera:
                 last = now
                 if dt > 0:
                     self._fps_est = 0.9 * self._fps_est + 0.1 * (1.0 / dt)
-                self._frame = frame                 # keep latest_frame() fresh every capture
                 # PREVIEW jpeg is throttled — the browser doesn't need full frame-rate, and
                 # encoding it every frame steals time from tracking/encoding. Throttle it
                 # harder while recording (the preview is "nice to have" during a run).
@@ -353,6 +353,25 @@ class Camera:
                     time.sleep(1.0 / max(self.fps, 1))
             except Exception:
                 time.sleep(0.05)
+
+    def _track_loop(self):
+        """Tracking + closed-loop run HERE, in their own thread, on the latest captured
+        frame — decoupled from the capture/record loop so heavy detection never drops the
+        recording fps. Produces the annotated (marker) frame the preview shows."""
+        last = None
+        while True:
+            frame = self._frame
+            if frame is None or frame is last:
+                time.sleep(0.003)
+                continue
+            last = frame
+            cb = self.frame_cb
+            if cb is None:
+                continue
+            try:
+                self._annotated = cb(frame)      # loop.on_frame: tracking + triggers + logging
+            except Exception:
+                self._annotated = frame
 
     def _encoder_loop(self):
         """Background thread: the ONLY place video frames are encoded/written. Runs the

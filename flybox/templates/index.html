@@ -354,8 +354,9 @@
     <section class="card">
       <h2>Tracking</h2>
       <label class="switch"><input type="checkbox" id="trackEn" onchange="setTrack();maybeAutoBuildRef()">
-        <span class="track"><span class="knob"></span></span> Enable tracking overlay</label>
-      <div class="rowbtns"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
+        <span class="track"><span class="knob"></span></span> Enable tracking</label>
+      <small class="hint">Runs in its own thread so it won't slow recording. Turns on automatically while the closed loop is armed or a session records — you don't need this on for the opto to fire.</small>
+      <div class="rowbtns" style="margin-top:8px"><button class="primary sm" onclick="autoTune()">⚙ Auto-tune detection</button>
         <small class="hint" id="tuneInfo"></small></div>
       <label style="margin-top:10px">Detection method</label>
       <select id="method" onchange="setTrack();updateMethodUI();maybeAutoBuildRef()" style="width:100%">
@@ -727,6 +728,8 @@ function raw(on){post('/api/light/raw',{channel:+$('rawch').value,level:on});}
 
 // closed loop
 function setLoop(){$('cooldownVal').textContent=$('cooldown').value+' s';
+  // arming the loop needs tracking + a reference; turn them on automatically
+  if($('loopEn').checked && !$('trackEn').checked){$('trackEn').checked=true;setTrack();maybeAutoBuildRef();}
   post('/api/loop',{enabled:$('loopEn').checked,cooldown_s:+$('cooldown').value});}
 function setProx(){$('proxDistVal').textContent=$('proxDist').value+' px';
   const sus=$('proxSustain').checked; $('simSecRow').style.display=sus?'none':'flex';

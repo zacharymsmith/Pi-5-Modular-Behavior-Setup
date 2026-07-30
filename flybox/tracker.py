@@ -114,7 +114,8 @@ class Tracker:
                                                # real flies labelled) | "hungarian" (0 swaps but
                                                # fragments more; pick it if silent swaps are worse
                                                # for you than a fly occasionally getting a new id)
-    fit_ellipse: bool = False                  # fit body ellipse (orientation + axes)
+    fit_ellipse: bool = False                  # fit body ellipse (orientation + axes for the CSV);
+                                               # off by default to save CPU — FlyTracker gets shape offline
     max_missed: int = TRACK_MAX_MISSED         # frames to coast a lost track
     confirm_frames: int = TRACK_CONFIRM_FRAMES # new blob must persist this long to become a track
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
@@ -386,33 +387,36 @@ class Tracker:
         if not prev or not dets:
             return matches
         d2 = (self.match_dist * self._rsf) ** 2      # match distance scales with frame width
-        def _cost(dd, p):
-            # cost = distance to whichever is closer: the velocity-PREDICTED position
-            # (separates flies at a crossing) or the LAST actual position (catches a
-            # fly that turned, so prediction overshoot doesn't fragment its id)
+
+        def _posd(dd, p):
+            # GATE distance = to whichever is closer: velocity-PREDICTED position (separates
+            # flies at a crossing) or LAST actual position (catches a fly that turned).
             cp = (dd["x"] - p["px"]) ** 2 + (dd["y"] - p["py"]) ** 2
             cc = (dd["x"] - p["x"]) ** 2 + (dd["y"] - p["y"]) ** 2
             return cp if cp < cc else cc
+
+        # (shape/size continuity was tried FlyTracker-style but small-blob ellipse fits are
+        # too noisy at this scale to help — position + velocity prediction ranks better.)
+        _cost = _posd
         if self.assignment == "hungarian":
-            big = d2 * 1000 + 1
+            big = 1e18
             cost = np.empty((len(prev), len(dets)), dtype=float)
             for i, p in enumerate(prev):
                 for j, dd in enumerate(dets):
-                    c = _cost(dd, p)
-                    cost[i, j] = c if c <= d2 else big     # forbid too-far links
+                    cost[i, j] = _cost(dd, p) if _posd(dd, p) <= d2 else big  # gate on position
             for i, j in _hungarian(cost):
-                if cost[i, j] <= d2:
+                if _posd(dets[j], prev[i]) <= d2:      # accept only real (in-range) links
                     matches[j] = prev[i]
         else:                                              # greedy
             used = set()
             for j, dd in enumerate(dets):
-                best, bestd = None, d2
+                best, bestc = None, None
                 for p in prev:
-                    if p["id"] in used:
+                    if p["id"] in used or _posd(dd, p) > d2:   # gate on position
                         continue
                     c = _cost(dd, p)
-                    if c < bestd:
-                        best, bestd = p, c
+                    if bestc is None or c < bestc:
+                        best, bestc = p, c
                 if best is not None:
                     used.add(best["id"])
                     matches[j] = best

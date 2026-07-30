@@ -59,7 +59,9 @@ class ClosedLoop:
 
     # ---- per-frame -----------------------------------------------------
     def on_frame(self, frame_bgr):
-        if not self.tracker.enabled:
+        # run tracking whenever it's needed: the user enabled the overlay, OR the closed
+        # loop is armed (so opto fires), OR a session is recording (so tracks are logged)
+        if not (self.tracker.enabled or self.enabled or session.running):
             return frame_bgr
         annotated, tracks = self.tracker.process(frame_bgr)
         h, w = frame_bgr.shape[:2]
