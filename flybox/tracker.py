@@ -137,6 +137,7 @@ class Tracker:
     _mask: object = None
     _mask_shape: object = None
     _adapt_ct: int = 0
+    _rsf: float = 1.0           # resolution scale = frame_width / 1024 (pixel params scale by it)
     _lost: Dict = field(default_factory=dict)   # id -> last pos, for reacquisition
     _det_hist: deque = field(default_factory=lambda: deque(maxlen=90))  # recent raw detect counts
 
@@ -286,7 +287,7 @@ class Tracker:
                     # isolates small LOCAL dark spots (the fly) regardless of the
                     # large-scale background level — robust on a non-uniform dish where
                     # a global threshold would flood. (Top-hat if the fly is lighter.)
-                    k = max(9, int(self.tophat_kernel) | 1)
+                    k = max(9, int(self.tophat_kernel * frame_bgr.shape[1] / 1024.0) | 1)
                     ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
                     mop = cv2.MORPH_BLACKHAT if self.invert else cv2.MORPH_TOPHAT
                     feat = cv2.morphologyEx(gray, mop, ker)
@@ -302,7 +303,7 @@ class Tracker:
         elif self.method == "tophat":
             # remove large-scale illumination + rim glow, keep the small fly.
             # black-hat isolates dark spots on a bright bg; top-hat the reverse.
-            k = max(9, int(self.tophat_kernel * scale) | 1)   # kernel scales with detect res
+            k = max(9, int(self.tophat_kernel * frame_bgr.shape[1] / 1024.0) | 1)  # scale w/ frame
             ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
             op = cv2.MORPH_BLACKHAT if self.invert else cv2.MORPH_TOPHAT
             feat = cv2.morphologyEx(gray, op, ker)
@@ -326,7 +327,10 @@ class Tracker:
         th = self._binarize(frame_bgr, scale)
         cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
-        min_a, max_a = self.min_area * scale * scale, self.max_area * scale * scale
+        # blob-size thresholds are set for a 1024px-wide frame; scale them to the ACTUAL
+        # frame width so the same min/max area works at 800x600, 1332x990, etc.
+        rsf = frame_bgr.shape[1] / 1024.0
+        min_a, max_a = self.min_area * rsf * rsf, self.max_area * rsf * rsf
         dets = []
         for c in cnts:
             a = cv2.contourArea(c)
@@ -381,7 +385,7 @@ class Tracker:
         matches = {}
         if not prev or not dets:
             return matches
-        d2 = self.match_dist ** 2
+        d2 = (self.match_dist * self._rsf) ** 2      # match distance scales with frame width
         def _cost(dd, p):
             # cost = distance to whichever is closer: the velocity-PREDICTED position
             # (separates flies at a crossing) or the LAST actual position (catches a
@@ -473,7 +477,7 @@ class Tracker:
 
     def _reacquire(self, x, y):
         """If a recently-lost fly's last position is near (x,y), reclaim its id."""
-        d2 = (self.match_dist * 2.5) ** 2
+        d2 = (self.match_dist * 2.5 * self._rsf) ** 2
         best, bd = None, d2
         for lid, l in self._lost.items():
             c = (x - l["x"]) ** 2 + (y - l["y"]) ** 2
@@ -485,6 +489,7 @@ class Tracker:
 
     def process(self, frame_bgr):
         annotated = frame_bgr.copy()
+        self._rsf = frame_bgr.shape[1] / 1024.0    # resolution scale for pixel params
         if self.roi is not None:   # show the arena boundary
             h, w = annotated.shape[:2]
             x1, y1, x2, y2 = self._roi_px(w, h)
