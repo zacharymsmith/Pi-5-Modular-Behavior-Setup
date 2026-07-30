@@ -35,9 +35,12 @@ OPTO_DEFAULT_INTENSITY = 1.0    # 0..1
 # ---------------------------------------------------------------------------
 # One capture stream feeds preview + recording + tracking. Keep it modest so the
 # Pi 5 can track in real time; record at the same resolution.
-PROCESS_SIZE = (1024, 768)      # default capture/record/track resolution (w, h)
+PROCESS_SIZE = (800, 600)       # default capture/record resolution (w, h) — the sweet spot
+                                # that records a real 50 fps in H.264 on the Pi 5 (bigger frames
+                                # overwhelm the software encoder). Pick a native mode in the UI
+                                # for max quality; this is the high-fps default.
 PREVIEW_SIZE = (640, 480)       # downscaled JPEG sent to the browser
-CAMERA_FPS = 30
+CAMERA_FPS = 50                 # verified achievable at 800×600 with H.264
 JPEG_QUALITY = 80
 RECORDING_DIR = "recordings"    # created under the app folder
 # Recording backend. "h264" uses picamera2's own (efficient, off-thread) H.264 encoder to
@@ -53,8 +56,8 @@ CAMERA_GAIN = 1.0               # analogue gain, used when auto is off
 # Image-tuning defaults — dialed in on the Cam Module 3 NoIR under IR (greyscale + high
 # contrast gives clean fly/background separation and 100% detection health). Adjust live in
 # the UI; these are just the starting point.
-CAMERA_CONTRAST = 3.0
-CAMERA_BRIGHTNESS = -0.18
+CAMERA_CONTRAST = 3.2
+CAMERA_BRIGHTNESS = -0.04
 CAMERA_SHARPNESS = 6.0
 CAMERA_SATURATION = 0.0         # 0 = greyscale (kills the dish hue)
 
