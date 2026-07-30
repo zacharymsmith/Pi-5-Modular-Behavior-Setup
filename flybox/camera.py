@@ -295,7 +295,11 @@ class Camera:
                 pf = 6 if self.recording else max(1, self.preview_fps)
                 if now - self._last_preview >= 1.0 / pf:
                     self._last_preview = now
-                    preview = cv2.resize(disp, PREVIEW_SIZE)
+                    # keep the CAPTURE aspect ratio so the preview isn't squished (and the
+                    # arena/zone drawing canvas lines up) at non-4:3 resolutions
+                    pw0 = PREVIEW_SIZE[0]
+                    ph0 = max(1, int(round(pw0 * disp.shape[0] / disp.shape[1])))
+                    preview = cv2.resize(disp, (pw0, ph0))
                     self._brightness = float(preview.mean())   # live scene brightness 0..255
                     pg = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
                     self._clipped = float((pg > 245).mean() * 100.0)   # highlight clipping %

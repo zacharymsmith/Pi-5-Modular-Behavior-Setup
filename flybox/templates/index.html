@@ -268,13 +268,15 @@
           <label>Intensity</label><input id="simInt" type="range" min="0" max="100" value="40" oninput="applySimStim()">
           <span class="val" id="simIntVal">40%</span>
         </div>
-        <div class="inline" style="gap:8px">
-          <small class="hint">for</small>
+        <label class="switch" style="margin-top:6px"><input type="checkbox" id="proxSustain" checked onchange="setProx()">
+          <span class="track"><span class="knob"></span></span> Stay on while they're close (vs. flash for a set time)</label>
+        <div class="inline" id="simSecRow" style="gap:8px;display:none">
+          <small class="hint">flash for</small>
           <input id="simSec" type="number" min="0.1" max="30" step="0.5" value="2" style="width:60px;padding:6px" onchange="applySimStim()">
           <small class="hint">seconds</small>
-          <small class="hint" id="simInfo"></small>
         </div>
-        <small class="hint">Lower intensity = gentler flash, so the red is less likely to wash out tracking. Drag it while running to tune live.</small>
+        <small class="hint" id="simInfo"></small>
+        <small class="hint">Lower intensity = gentler light, so the red is less likely to wash out tracking. Drag it while running to tune live.</small>
         <div class="statline" id="proxDiag" style="margin-top:6px">flies: 0 · min dist: —</div>
       </div>
 
@@ -560,8 +562,9 @@ function holdOpto(ch,v){v=+v;$( ch==='red'?'holdRedVal':'holdBlueVal').textConte
 // interaction → light at a chosen PWM intensity for N s (freq 0 = steady, not pulsed)
 function applySimStim(){const ch=$('proxChan').value,intn=+$('simInt').value/100,sec=+$('simSec').value;
   $('simIntVal').textContent=Math.round(intn*100)+'%';
+  const sus=$('proxSustain')?$('proxSustain').checked:true;
   post('/api/loop/protocol',{channel:ch,frequency_hz:0,pulse_width_ms:0,train_duration_s:sec,rest_s:0,n_bursts:1,intensity:intn})
-    .then(r=>{$('simInfo').textContent=r.ok?`✓ ${ch} ${Math.round(intn*100)}% for ${sec}s`:'failed';});}
+    .then(r=>{$('simInfo').textContent=r.ok?(sus?`✓ ${ch} holds at ${Math.round(intn*100)}% while flies are close`:`✓ ${ch} ${Math.round(intn*100)}% for ${sec}s on contact`):'failed';});}
 
 // tracking
 function setTrack(){$('threshVal').textContent=$('thresh').value;$('minareaVal').textContent=$('minarea').value;
@@ -718,7 +721,9 @@ function raw(on){post('/api/light/raw',{channel:+$('rawch').value,level:on});}
 function setLoop(){$('cooldownVal').textContent=$('cooldown').value+' s';
   post('/api/loop',{enabled:$('loopEn').checked,cooldown_s:+$('cooldown').value});}
 function setProx(){$('proxDistVal').textContent=$('proxDist').value+' px';
-  post('/api/loop/proximity',{enabled:$('proxEn').checked,distance_px:+$('proxDist').value,channel:$('proxChan').value});}
+  const sus=$('proxSustain').checked; $('simSecRow').style.display=sus?'none':'flex';
+  post('/api/loop/proximity',{enabled:$('proxEn').checked,distance_px:+$('proxDist').value,channel:$('proxChan').value,sustained:sus});
+  applySimStim();}
 function clearZones(){post('/api/loop/zones/clear').then(refresh);}
 function removeZone(id){post('/api/loop/zone/remove',{id}).then(refresh);}
 function setTriggerProto(){post('/api/loop/protocol',protoObj()).then(refresh);}
@@ -871,6 +876,8 @@ async function refresh(){
     $('proxEn').checked=s.loop.proximity.enabled;
     $('proxDist').value=s.loop.proximity.distance_px;$('proxDistVal').textContent=s.loop.proximity.distance_px+' px';
     $('proxChan').value=s.loop.proximity.channel;
+    if(s.loop.proximity.sustained!=null){$('proxSustain').checked=s.loop.proximity.sustained;
+      $('simSecRow').style.display=s.loop.proximity.sustained?'none':'flex';}
     // reflect the trigger channel's actual intensity/duration in the interaction sliders
     const _pp=s.loop.protocols&&s.loop.protocols[s.loop.proximity.channel];
     if(_pp){

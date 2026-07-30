@@ -44,7 +44,8 @@ class ClosedLoop:
         self.protocols = {"red": _default_protocol("red"),
                           "blue": _default_protocol("blue")}
         self.proximity = {"enabled": False, "distance_px": 80,
-                          "channel": "blue", "_last": 0.0}
+                          "channel": "blue", "_last": 0.0, "sustained": True}
+        self._sustain_on = None      # channel currently held ON by a sustained interaction
         self.fires = 0
         self.last_event = "—"
         self.frame_i = 0
@@ -129,10 +130,35 @@ class ClosedLoop:
                         (8, 44), _FONT, 0.5, pcol, 1)
             merged = (self._prev_count >= 2 and count <= 1
                       and self._prev_min_dist is not None and self._prev_min_dist < d * 1.8)
-            if self.enabled and (pairs or merged):
+            close = bool(pairs or merged)
+            if self.enabled and self.proximity.get("sustained", True):
+                # SUSTAINED: hold the channel ON while the flies stay close, off when apart
+                ch = self.proximity["channel"]
+                intn = float(self.protocols[ch].intensity)
+                if close and self._sustain_on != ch:
+                    if self._sustain_on and self._sustain_on != ch:
+                        opto.hold(self._sustain_on, 0.0)
+                    opto.hold(ch, intn)
+                    self._sustain_on = ch
+                    self.fires += 1
+                    self.last_event = f"{time.strftime('%H:%M:%S')} · {ch} ON (interaction)"
+                    if session.running:
+                        session.log_event("interaction-on", ch, {"intensity": intn})
+                elif (not close) and self._sustain_on:
+                    opto.hold(self._sustain_on, 0.0)
+                    if session.running:
+                        session.log_event("interaction-off", self._sustain_on, {})
+                    self.last_event = f"{time.strftime('%H:%M:%S')} · {self._sustain_on} off"
+                    self._sustain_on = None
+            elif self.enabled and close:
                 self._fire(self.proximity["channel"], self.proximity,
                            "proximity" if pairs else "proximity-merge",
                            annotated, (0, 0, w - 1, h - 1))
+        # safety: if a sustained light is on but the condition/arming no longer holds, kill it
+        if self._sustain_on and not (self.enabled and self.proximity["enabled"]
+                                     and self.proximity.get("sustained", True)):
+            opto.hold(self._sustain_on, 0.0)
+            self._sustain_on = None
         self._prev_count = count
         self._prev_min_dist = self.min_dist_px
 
@@ -258,13 +284,15 @@ class ClosedLoop:
     def clear_zones(self):
         self.zones = []
 
-    def set_proximity(self, enabled=None, distance_px=None, channel=None):
+    def set_proximity(self, enabled=None, distance_px=None, channel=None, sustained=None):
         if enabled is not None:
             self.proximity["enabled"] = bool(enabled)
         if distance_px is not None:
             self.proximity["distance_px"] = int(distance_px)
         if channel is not None:
             self.proximity["channel"] = channel
+        if sustained is not None:
+            self.proximity["sustained"] = bool(sustained)
 
     def set_protocol(self, proto: Protocol):
         self.protocols[proto.channel] = proto
@@ -289,7 +317,8 @@ class ClosedLoop:
             "proximity": {"enabled": self.proximity["enabled"],
                           "distance_px": self.proximity["distance_px"],
                           "distance_mm": self._mm(self.proximity["distance_px"]),
-                          "channel": self.proximity["channel"]},
+                          "channel": self.proximity["channel"],
+                          "sustained": self.proximity.get("sustained", True)},
             "protocols": {c: psum(p) for c, p in self.protocols.items()},
             "fires": self.fires,
             "last_event": self.last_event,

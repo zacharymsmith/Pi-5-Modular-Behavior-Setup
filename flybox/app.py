@@ -175,6 +175,7 @@ class ProximityIn(BaseModel):
     enabled: bool | None = None
     distance_px: int | None = None
     channel: str | None = None
+    sustained: bool | None = None
 
 
 # --- UI + stream -----------------------------------------------------------
@@ -474,7 +475,7 @@ def clear_zones():
 
 @app.post("/api/loop/proximity")
 def set_proximity(p: ProximityIn):
-    loop.set_proximity(p.enabled, p.distance_px, p.channel)
+    loop.set_proximity(p.enabled, p.distance_px, p.channel, p.sustained)
     return {"ok": True, "loop": loop.status()}
 
 
@@ -589,7 +590,8 @@ def _apply_config(d: dict):
             loop.add_zone(*z["roi"], z.get("channel", "red"), z.get("shape", "rect"))
     px = d.get("proximity", {})
     if px:
-        loop.set_proximity(px.get("enabled"), px.get("distance_px"), px.get("channel"))
+        loop.set_proximity(px.get("enabled"), px.get("distance_px"), px.get("channel"),
+                           px.get("sustained"))
     if "cooldown_s" in d:
         loop.cooldown_s = d["cooldown_s"]
     if "calibration" in d:
