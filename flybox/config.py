@@ -50,6 +50,13 @@ RECORD_H264_MBPS = 0            # 0 = auto bitrate from resolution×fps; else fi
 CAMERA_AUTO_EXPOSURE = True
 CAMERA_EXPOSURE_US = 8000       # microseconds, used when auto is off
 CAMERA_GAIN = 1.0               # analogue gain, used when auto is off
+# Image-tuning defaults — dialed in on the Cam Module 3 NoIR under IR (greyscale + high
+# contrast gives clean fly/background separation and 100% detection health). Adjust live in
+# the UI; these are just the starting point.
+CAMERA_CONTRAST = 3.0
+CAMERA_BRIGHTNESS = -0.18
+CAMERA_SHARPNESS = 6.0
+CAMERA_SATURATION = 0.0         # 0 = greyscale (kills the dish hue)
 
 # ---------------------------------------------------------------------------
 # Presets (saved experiment configurations for reproducibility)

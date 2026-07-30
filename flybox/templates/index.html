@@ -180,7 +180,8 @@
           <div><label id="camResLabel">Resolution</label><select id="camRes" onchange="capFps()">
             <option value="1024x768">1024×768</option>
           </select></div>
-          <div><label>FPS</label><input id="camFps" type="number" value="30" min="1" max="120"></div>
+          <div><label>FPS</label><input id="camFps" type="number" value="30" min="1" max="120">
+            <small class="hint" id="fpsCeil"></small></div>
           <div style="align-self:end"><label class="switch"><input type="checkbox" id="camAuto" checked onchange="camAutoToggle()">
             <span class="track"><span class="knob"></span></span> Auto-exp</label></div>
           <div><label>Exposure µs</label><input id="camExp" type="number" value="8000" min="100" step="500" disabled></div>
@@ -189,20 +190,20 @@
         </div>
         <small class="hint">Resolution change reconfigures the camera — stop recording first. FPS is capped by the sensor mode, by exposure (e.g. 33000µs ⇒ ≤30 fps), and by CPU (lower res + lighter detection = higher fps).</small>
         <div class="slider" style="margin-top:10px">
-          <label>Contrast</label><input id="camContrast" type="range" min="0.5" max="4" step="0.1" value="1" oninput="setImg()">
-          <span class="val" id="camContrastVal">1.0</span>
+          <label>Contrast</label><input id="camContrast" type="range" min="0.5" max="4" step="0.1" value="3" oninput="setImg()">
+          <span class="val" id="camContrastVal">3.0</span>
         </div>
         <div class="slider">
-          <label>Brightness</label><input id="camBright" type="range" min="-0.5" max="0.5" step="0.02" value="0" oninput="setImg()">
-          <span class="val" id="camBrightVal">0.00</span>
+          <label>Brightness</label><input id="camBright" type="range" min="-0.5" max="0.5" step="0.02" value="-0.18" oninput="setImg()">
+          <span class="val" id="camBrightVal">-0.18</span>
         </div>
         <div class="slider">
-          <label>Sharpness</label><input id="camSharp" type="range" min="0" max="8" step="0.5" value="1" oninput="setImg()">
-          <span class="val" id="camSharpVal">1.0</span>
+          <label>Sharpness</label><input id="camSharp" type="range" min="0" max="8" step="0.5" value="6" oninput="setImg()">
+          <span class="val" id="camSharpVal">6.0</span>
         </div>
         <div class="slider">
-          <label>Saturation</label><input id="camSat" type="range" min="0" max="4" step="0.1" value="1" oninput="setImg()">
-          <span class="val" id="camSatVal">1.0</span>
+          <label>Saturation</label><input id="camSat" type="range" min="0" max="4" step="0.1" value="0" oninput="setImg()">
+          <span class="val" id="camSatVal">0.0</span>
         </div>
         <small class="hint">Live image tuning — raise contrast/sharpness to make low-contrast flies pop; drop saturation to 0 for greyscale (removes the pink dish hue). Applies to preview + recording.</small>
         <div class="rowbtns" style="margin-top:10px">
@@ -638,15 +639,17 @@ function autoExpose(){$('expInfo').textContent='metering the arena…';
     if(!r.ok){$('expInfo').textContent=r.error||'failed';return;}
     $('expInfo').textContent=`locked ${r.exposure_us}µs · gain ${r.gain} · arena≈${r.measured}`+(r.metered_arena?'':' (whole frame — set an arena ROI)');
     built=false;refresh();});}
-function maxFps(){  // pick the highest-fps sensor mode + a short exposure that allows it
+function maxFps(){  // pick the highest-fps sensor mode + a short exposure + boosted gain
   let best=null;
   for(const o of $('camRes').options){const f=MODE_FPS[o.value]||30; if(!best||f>best.f)best={v:o.value,f:f};}
   if(!best)return;
   $('camRes').value=best.v; capFps(); $('camFps').value=best.f;
   $('camAuto').checked=false; camAutoToggle();
-  $('camExp').value=Math.max(500, Math.round(1000000/best.f)-800);  // exposure < frame period
+  const exp=Math.max(500, Math.round(1000000/best.f)-600);   // exposure must be < frame period
+  $('camExp').value=exp;
+  $('camGain').value=Math.min(16,Math.max(+$('camGain').value||1, 8)); // short exposure = dark -> gain up
   applyCam();
-  $('expInfo').textContent=`⚡ ${best.v} @ ${best.f}fps — short exposure, so add IR/white light and raise gain if dark`;}
+  $('expInfo').textContent=`⚡ ${best.v} @ ${best.f}fps · exposure ${exp}µs — add IR light; if too dark, raise gain more`;}
 function autoFocus(){$('expInfo').textContent='autofocusing…';
   post('/api/camera/autofocus').then(r=>{
     $('expInfo').textContent=r.ok?`focus locked · lens ${r.lens_position} · sharpness ${r.focus}`:(r.error||'failed');});}
@@ -911,6 +914,13 @@ async function refresh(){
     $('camAuto').checked=s.camera.controls.auto_exposure;
     $('camExp').value=s.camera.controls.exposure_us;
     $('camGain').value=s.camera.controls.gain;
+    // show the frame-rate ceiling set by exposure, and whether exposure was clamped to hit fps
+    {const eff=s.camera.exposure_effective_us||s.camera.controls.exposure_us, req=s.camera.controls.exposure_us;
+     const ceil=Math.floor(1000000/Math.max(1,req)), tgt=+$('camFps').value;
+     if(s.camera.controls.auto_exposure){$('fpsCeil').textContent='';}
+     else if(eff<req-100){$('fpsCeil').innerHTML='<span style="color:var(--amber)">exposure clamped to '+eff+'µs to reach '+tgt+'fps — raise gain/light</span>';}
+     else if(ceil<tgt){$('fpsCeil').innerHTML='<span style="color:var(--red)">exposure limits to ~'+ceil+'fps</span>';}
+     else{$('fpsCeil').textContent='max ~'+ceil+'fps at this exposure';}}
     if(document.activeElement!==$('camContrast')&&s.camera.controls.contrast!=null){
       $('camContrast').value=s.camera.controls.contrast;$('camContrastVal').textContent=(+s.camera.controls.contrast).toFixed(1);}
     if(document.activeElement!==$('camBright')&&s.camera.controls.brightness!=null){

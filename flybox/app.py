@@ -742,8 +742,9 @@ def reset_analytics():
 @app.on_event("shutdown")
 def _shutdown():
     scheduler.stop()
+    if camera.recording:          # finalize ANY recording (session or standalone) so the
+        camera.stop_recording()   # video file is never left un-finalized/corrupt
     if session.running:
-        camera.stop_recording()
         session.stop()
     opto.cleanup()
     lights.all_off()

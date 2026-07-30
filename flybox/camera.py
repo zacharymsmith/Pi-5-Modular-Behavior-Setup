@@ -19,6 +19,7 @@ import cv2
 from config import (
     PROCESS_SIZE, PREVIEW_SIZE, CAMERA_FPS, JPEG_QUALITY, RECORDING_DIR,
     CAMERA_AUTO_EXPOSURE, CAMERA_EXPOSURE_US, CAMERA_GAIN,
+    CAMERA_CONTRAST, CAMERA_BRIGHTNESS, CAMERA_SHARPNESS, CAMERA_SATURATION,
     RECORD_H264, RECORD_H264_MBPS,
 )
 
@@ -55,10 +56,10 @@ class Camera:
         self.controls = {"auto_exposure": CAMERA_AUTO_EXPOSURE,
                          "exposure_us": CAMERA_EXPOSURE_US,
                          "gain": CAMERA_GAIN,
-                         "contrast": 1.0,       # ISP contrast (1.0 = neutral, >1 = punchier)
-                         "brightness": 0.0,     # ISP brightness (-1..1, 0 = neutral)
-                         "sharpness": 1.0,      # ISP sharpness (0 = soft, 1 = neutral, >1 = crisp)
-                         "saturation": 1.0}     # ISP colour saturation (0 = grey, 1 = neutral)
+                         "contrast": CAMERA_CONTRAST,     # ISP image tuning — NoIR/IR defaults
+                         "brightness": CAMERA_BRIGHTNESS,
+                         "sharpness": CAMERA_SHARPNESS,
+                         "saturation": CAMERA_SATURATION} # 0 = greyscale
         self._cond = threading.Condition()
         self._jpeg = None
         self._frame = None
@@ -92,6 +93,9 @@ class Camera:
         self._record_fps = 0.0
         self._rec_frame = 0
         self._rec_t0 = 0.0
+        self._eff_exposure = int(CAMERA_EXPOSURE_US)
+        self._has_lores = False         # lores stream for tracking/preview (frees the
+        self._lores_size = None         # full-res main stream for the recorder = no fps drop)
         # configurable info overlay burned into the video (NOT the tracking markers)
         self.overlay = {"enabled": True, "title": "", "show_datetime": True,
                         "show_elapsed": True, "show_frame": True, "show_fps": True,
@@ -106,12 +110,21 @@ class Camera:
 
     # ---- camera lifecycle ---------------------------------------------
     def _cam_controls(self):
-        c = {"FrameRate": self.fps}
+        # FPS is authoritative: force the frame duration to the requested fps. Exposure
+        # time can NEVER exceed the frame period (physics), so we clamp it to fit — this
+        # is what actually lets you record at high fps (the image gets darker, so add IR
+        # light / raise gain). frame_us = 1e6 / fps.
+        fps = max(1.0, float(self.fps))
+        frame_us = int(round(1_000_000.0 / fps))
+        c = {"FrameDurationLimits": (frame_us, frame_us)}
+        self._eff_exposure = int(self.controls["exposure_us"])
         if self.controls["auto_exposure"]:
             c["AeEnable"] = True
         else:
             c["AeEnable"] = False
-            c["ExposureTime"] = int(self.controls["exposure_us"])
+            eff = min(int(self.controls["exposure_us"]), max(100, frame_us - 200))
+            self._eff_exposure = eff
+            c["ExposureTime"] = eff
             c["AnalogueGain"] = float(self.controls["gain"])
         c["Contrast"] = float(self.controls.get("contrast", 1.0))       # ISP image tuning —
         c["Brightness"] = float(self.controls.get("brightness", 0.0))   # helps low-contrast flies pop
@@ -151,12 +164,28 @@ class Camera:
         try:
             cam = Picamera2()
             self._read_sensor_info(cam)                 # detect sensor + its native modes
-            cfg = cam.create_video_configuration(
-                main={"size": tuple(self.size), "format": "RGB888"},
-                controls=self._cam_controls(),
-            )
-            cam.configure(cfg)
-            cam.start()
+            main = tuple(self.size)
+            # a small lores stream drives tracking + preview so the recorder can own the
+            # full-res main stream alone (no capture/encode contention -> fps holds up)
+            lw = min(800, main[0]); lw -= lw % 2
+            lh = int(round(lw * main[1] / main[0])); lh -= lh % 2
+            self._lores_size = (lw, lh)
+            self._has_lores = False
+            try:
+                cfg = cam.create_video_configuration(
+                    main={"size": main, "format": "RGB888"},
+                    lores={"size": self._lores_size, "format": "YUV420"},
+                    controls=self._cam_controls())
+                cam.configure(cfg)
+                cam.start()
+                self._has_lores = True
+            except Exception:                            # some modes reject lores -> main only
+                cam.stop() if False else None
+                cfg = cam.create_video_configuration(
+                    main={"size": main, "format": "RGB888"}, controls=self._cam_controls())
+                cam.configure(cfg)
+                cam.start()
+                self._has_lores = False
             self._cam = cam
             self.hw = True
             try:
@@ -239,6 +268,12 @@ class Camera:
     def _grab(self):
         if self.force_mock or not self.hw or self._cam is None:
             return self._mock_frame()
+        if self._has_lores:
+            try:
+                yuv = self._cam.capture_array("lores")      # small stream -> cheap tracking
+                return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+            except Exception:
+                self._has_lores = False                     # conversion/format issue -> use main
         return self._cam.capture_array("main")
 
     def _loop(self):
@@ -598,6 +633,8 @@ class Camera:
             "rec_elapsed": round(time.time() - self._rec_t0, 0) if self.recording else 0,
             "record_fps": self._record_fps,
             "record_backend": self.record_backend,
+            "exposure_effective_us": self._eff_exposure,
+            "has_lores": self._has_lores,
             "annotated": self._writer2 is not None,
             "fps": round(self._fps_est, 1),
             "size": list(self.size),

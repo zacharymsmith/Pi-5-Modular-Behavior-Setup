@@ -1,0 +1,154 @@
+{
+  "name": "test_30jul_looksgood",
+  "started": "2026-07-30T11:50:07.630496",
+  "git_commit": "a7e48d2",
+  "info": {
+    "experimenter": "ZMS",
+    "genotype": null,
+    "notes": null
+  },
+  "setup": {
+    "protocols": {
+      "red": {
+        "frequency_hz": 0.0,
+        "pulse_width_ms": 0.0,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "red",
+        "intensity": 0.05
+      },
+      "blue": {
+        "frequency_hz": 20,
+        "pulse_width_ms": 10,
+        "train_duration_s": 1.0,
+        "rest_s": 0.0,
+        "n_bursts": 1,
+        "channel": "blue",
+        "intensity": 1.0
+      }
+    },
+    "zones": [],
+    "proximity": {
+      "enabled": true,
+      "distance_px": 60,
+      "channel": "red"
+    },
+    "cooldown_s": 2.0,
+    "calibration": null,
+    "tracker": {
+      "enabled": true,
+      "method": "refsub",
+      "auto_threshold": true,
+      "threshold": 60,
+      "invert": true,
+      "blur": true,
+      "clahe": false,
+      "tophat_kernel": 25,
+      "bg_adapt": true,
+      "bg_learn": 0.03,
+      "detect_static": true,
+      "min_area": 25,
+      "max_area": 4000,
+      "max_blobs": 10,
+      "match_dist": 90,
+      "sensitivity": 55,
+      "solidity": 0.4,
+      "assignment": "greedy",
+      "fit_ellipse": false,
+      "max_missed": 18,
+      "confirm_frames": 3,
+      "expected_flies": 2,
+      "reacquire_frames": 250,
+      "predict": 1.0,
+      "vel_smooth": 0.6,
+      "detect_max_w": 0,
+      "trails": false,
+      "trail_len": 30,
+      "roi": {
+        "shape": "ellipse",
+        "x1": 0.3370436331255565,
+        "y1": 0.0015822784810126582,
+        "x2": 0.784060552092609,
+        "y2": 0.814873417721519
+      }
+    },
+    "camera": {
+      "width": 1536,
+      "height": 864,
+      "fps": 120.0,
+      "overlay": {
+        "enabled": true,
+        "title": "",
+        "show_datetime": true,
+        "show_elapsed": true,
+        "show_frame": true,
+        "show_fps": true,
+        "corner": "tl"
+      },
+      "auto_exposure": false,
+      "exposure_us": 30132,
+      "gain": 4.16,
+      "contrast": 3.0,
+      "brightness": -0.18,
+      "sharpness": 6.0,
+      "saturation": 0.0
+    }
+  },
+  "ended": "2026-07-30T11:53:30.327851",
+  "duration_s": 202.7,
+  "n_events": 14,
+  "n_track_rows": 1752,
+  "summary": {
+    "duration_s": 202.7,
+    "actual_fps": 4.5,
+    "n_flies": 6,
+    "flies": {
+      "2": {
+        "n_points": 548,
+        "path_px": 1263.2,
+        "mean_speed_px_s": 7.8,
+        "max_speed_px_s": 170.6
+      },
+      "7": {
+        "n_points": 165,
+        "path_px": 57.9,
+        "mean_speed_px_s": 1.0,
+        "max_speed_px_s": 3.8
+      },
+      "21": {
+        "n_points": 329,
+        "path_px": 732.7,
+        "mean_speed_px_s": 6.9,
+        "max_speed_px_s": 74.1
+      },
+      "39": {
+        "n_points": 49,
+        "path_px": 0.0,
+        "mean_speed_px_s": 0.0,
+        "max_speed_px_s": 0.0
+      },
+      "27": {
+        "n_points": 59,
+        "path_px": 520.2,
+        "mean_speed_px_s": 34.7,
+        "max_speed_px_s": 119.9
+      },
+      "40": {
+        "n_points": 602,
+        "path_px": 800.3,
+        "mean_speed_px_s": 4.3,
+        "max_speed_px_s": 49.1
+      }
+    },
+    "n_spurious_tracks": 0,
+    "spurious_tracks": {},
+    "stim_counts": {
+      "red": 14
+    },
+    "dose_mJ_cm2_total": {
+      "red": 0.0
+    },
+    "calibration_mm_per_px": null
+  }
+}
