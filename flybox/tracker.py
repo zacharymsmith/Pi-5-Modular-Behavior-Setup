@@ -121,6 +121,9 @@ class Tracker:
     expected_flies: int = TRACK_EXPECTED_FLIES # cap on reported flies (0 = unlimited)
     reacquire_frames: int = 250                # remember a lost fly's last position this long;
                                                # a new blob near it reclaims the OLD id (fewer swaps)
+    reacquire_mult: float = 4.0                # reclaim radius = match_dist * this. A fly hidden in a
+                                               # multi-fly huddle re-emerges further from where it was
+                                               # lost, so a generous radius holds its id (was 2.5)
     predict: float = 1.0                       # frames of motion to extrapolate when matching.
                                                # 1.0 + the predicted-OR-actual cost = best identity
                                                # coverage with fewest swaps across 7 test videos
@@ -466,18 +469,19 @@ class Tracker:
                 vx = a * (x - best["x"]) + (1 - a) * best.get("vx", 0.0)
                 vy = a * (y - best["y"]) + (1 - a) * best.get("vy", 0.0)
                 tracks.append({"id": best["id"], "x": x, "y": y, "vx": vx, "vy": vy,
-                               "speed": (vx * vx + vy * vy) ** 0.5, "missed": 0,
+                               "speed": (vx * vx + vy * vy) ** 0.5, "missed": 0, "sx": x, "sy": y,
                                "coasting": False, "age": best.get("age", 0) + 1, **ell})
             else:
                 rid = self._reacquire(x, y)          # reclaim a recently-lost id near here
                 if rid is not None:
                     tracks.append({"id": rid, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
-                                   "speed": 0.0, "missed": 0, "coasting": False,
+                                   "speed": 0.0, "missed": 0, "coasting": False, "sx": x, "sy": y,
                                    "age": self.confirm_frames, **ell})   # already-established fly
                     matched_ids.add(rid)
                 else:
                     tracks.append({"id": self._next_id, "x": x, "y": y, "vx": 0.0, "vy": 0.0,
-                                   "speed": 0.0, "missed": 0, "coasting": False, "age": 1, **ell})
+                                   "speed": 0.0, "missed": 0, "coasting": False, "sx": x, "sy": y,
+                                   "age": 1, **ell})
                     self._next_id += 1
         # coast unmatched previous tracks through the gap (holds identity + trigger)
         for p in prev:
@@ -487,13 +491,16 @@ class Tracker:
             missed = p.get("missed", 0) + 1
             if missed > self.max_missed:
                 # coasting exhausted: remember last position so it can be reacquired later
-                self._lost[p["id"]] = {"x": p["px"], "y": p["py"], "cold": 0,
-                                       "angle": p.get("angle"), "major": p.get("major", 0.0),
-                                       "minor": p.get("minor", 0.0)}
+                # remember where it was last SEEN (not the drifted coast prediction) so a fly
+                # re-emerging from a huddle is reclaimed near its real vanish point
+                self._lost[p["id"]] = {"x": p.get("sx", p["px"]), "y": p.get("sy", p["py"]),
+                                       "cold": 0, "angle": p.get("angle"),
+                                       "major": p.get("major", 0.0), "minor": p.get("minor", 0.0)}
                 continue
             vx, vy = p.get("vx", 0.0) * 0.85, p.get("vy", 0.0) * 0.85
             tracks.append({"id": p["id"], "x": int(round(p["px"])), "y": int(round(p["py"])),
                            "vx": vx, "vy": vy, "speed": (vx * vx + vy * vy) ** 0.5,
+                           "sx": p.get("sx", p["x"]), "sy": p.get("sy", p["y"]),
                            "missed": missed, "coasting": True, "age": p.get("age", 0),
                            "angle": p.get("angle"), "major": p.get("major", 0.0),
                            "minor": p.get("minor", 0.0)})
@@ -506,7 +513,7 @@ class Tracker:
 
     def _reacquire(self, x, y):
         """If a recently-lost fly's last position is near (x,y), reclaim its id."""
-        d2 = (self.match_dist * 2.5 * self._rsf) ** 2
+        d2 = (self.match_dist * self.reacquire_mult * self._rsf) ** 2
         best, bd = None, d2
         for lid, l in self._lost.items():
             c = (x - l["x"]) ** 2 + (y - l["y"]) ** 2
