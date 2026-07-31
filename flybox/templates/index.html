@@ -769,11 +769,22 @@ function updateHint(){
   $('drawHint').textContent=`${t} — ${how}.`;}
 function drawColor(){return drawTarget==='arena'?'#ffff00':(drawTarget==='red'?'#e5484d':'#3aa0ff');}
 
-const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;
-function fit(){const r=$('preview').getBoundingClientRect();cv.width=Math.round(r.width);cv.height=Math.round(r.height);}
+const cv=$('roiCanvas'),ctx=cv.getContext('2d');let drag=null;let camAR={w:4,h:3};
+// size the drawing buffer from the CANVAS's own box (same element pos() maps against), so
+// a click lands exactly where you put it — sizing from the <img> caused an off-centre offset
+function fit(){const r=cv.getBoundingClientRect();cv.width=Math.max(1,Math.round(r.width));cv.height=Math.max(1,Math.round(r.height));}
 window.addEventListener('resize',fit);
 function pos(e){const r=cv.getBoundingClientRect();
   return {x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height};}
+// the frame is object-fit:contain inside the canvas, so it can be letterboxed (esp. in
+// fullscreen). Compute the actual displayed image rectangle so clicks map to real pixels.
+function imgRect(){const im=$('preview');
+  const iw=im.naturalWidth||camAR.w, ih=im.naturalHeight||camAR.h, ar=(iw&&ih)?iw/ih:(camAR.w/camAR.h);
+  const cw=cv.width, ch=cv.height, car=cw/ch; let w,h,ox,oy;
+  if(car>ar){h=ch;w=ch*ar;ox=(cw-w)/2;oy=0;} else {w=cw;h=cw/ar;ox=0;oy=(ch-h)/2;}
+  return {ox,oy,w,h};}
+function norm(p){const r=imgRect();
+  return {x:Math.min(1,Math.max(0,(p.x-r.ox)/r.w)), y:Math.min(1,Math.max(0,(p.y-r.oy)/r.h))};}
 function rubber(a,b){ctx.clearRect(0,0,cv.width,cv.height);ctx.strokeStyle=drawColor();ctx.lineWidth=2;
   if(drawShape==='ellipse'){                       // centre-anchored: a = centre (fixed)
     ctx.beginPath();ctx.ellipse(a.x,a.y,Math.abs(b.x-a.x),Math.abs(b.y-a.y),0,0,7);ctx.stroke();
@@ -786,7 +797,8 @@ cv.addEventListener('mouseup',e=>{if(!drag)return;const p=pos(e);let x1,y1,x2,y2
     x1=drag.x-rx;y1=drag.y-ry;x2=drag.x+rx;y2=drag.y+ry;}   // box from centre+radius
   else {x1=drag.x;y1=drag.y;x2=p.x;y2=p.y;}
   drag=null;setTimeout(()=>ctx.clearRect(0,0,cv.width,cv.height),300);
-  const nx1=x1/cv.width,ny1=y1/cv.height,nx2=x2/cv.width,ny2=y2/cv.height;
+  const a=norm({x:x1,y:y1}),b=norm({x:x2,y:y2});           // canvas px -> image fraction (letterbox-aware)
+  const nx1=a.x,ny1=a.y,nx2=b.x,ny2=b.y;
   if(Math.abs(nx2-nx1)<0.02||Math.abs(ny2-ny1)<0.02)return;
   if(drawTarget==='arena') post('/api/track/roi',{nx1,ny1,nx2,ny2,shape:drawShape}).then(refresh);
   else post('/api/loop/zone',{nx1,ny1,nx2,ny2,channel:drawTarget,shape:drawShape}).then(refresh);});
@@ -822,7 +834,7 @@ async function refresh(){
   $('camRetry').style.display=s.camera.camera_present?'none':'inline-block';
   // match the preview box to the real video aspect so drawing clicks are exact
   const pw=document.querySelector('.previewWrap'), cs=s.camera.size;
-  if(cs&&cs[0]&&cs[1]){const key=cs[0]+'x'+cs[1];
+  if(cs&&cs[0]&&cs[1]){camAR.w=cs[0];camAR.h=cs[1];const key=cs[0]+'x'+cs[1];
     if(key!==lastCamKey){lastCamKey=key;pw.style.aspectRatio=cs[0]+' / '+cs[1];setTimeout(fit,60);}}
   $('optoStat').textContent=s.opto.running?('● '+s.opto.message):s.opto.message;
   $('optoStat').className='statline'+(s.opto.running?' on':'');
