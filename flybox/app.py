@@ -108,7 +108,7 @@ SECTION_KEYS = {
     "stim": ["protocols"],
     "tracking": ["tracker"],
     "triggers": ["zones", "proximity", "cooldown_s"],
-    "camera": ["camera"],
+    "camera": ["camera", "lights"],      # imaging incl. white/IR illumination levels
     "calibration": ["calibration"],
 }
 
@@ -586,6 +586,8 @@ def _gather_config() -> dict:
         # (auto-exposure, exposure, gain, contrast, brightness, sharpness, saturation)
         "camera": {"width": s["size"][0], "height": s["size"][1],
                    "fps": s["target_fps"], "overlay": s["overlay"], **s["controls"]},
+        # white / IR illumination levels (per-channel 0..1)
+        "lights": dict(lights.levels),
     }
 
 
@@ -607,6 +609,8 @@ def _apply_config(d: dict):
     tk = d.get("tracker", {})
     if tk:
         tracker.apply_config(tk)         # restores ALL tracker settings + arena ROI
+    for name, lvl in d.get("lights", {}).items():   # restore white / IR light levels
+        lights.set_light(name, lvl)
     cam = d.get("camera", {})
     if cam:
         if cam.get("overlay"):
