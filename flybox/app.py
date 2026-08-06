@@ -662,7 +662,14 @@ def session_start(s: SessionStartIn):
     except Exception as e:
         return {"ok": False, "error": f"could not create session folder: {e}"}
     camera.start_recording(directory=d)
-    return {"ok": True, "dir": d, "session": session.status()}
+    # auto-save a reloadable preset of the same name, so "run a session" always leaves
+    # you a one-click restore of exactly these settings
+    try:
+        cfg = _gather_config(); cfg["_sections"] = list(SECTION_KEYS.keys())
+        presets.save(s.name or "session", cfg)
+    except Exception:
+        pass
+    return {"ok": True, "dir": d, "session": session.status(), "presets": presets.list_presets()}
 
 
 @app.post("/api/session/stop")
@@ -670,6 +677,23 @@ def session_stop():
     camera.stop_recording()
     d = session.stop()
     return {"ok": True, "dir": d}
+
+
+@app.get("/api/sessions")
+def sessions_list():
+    """Past sessions (in the current data folder) whose settings can be reloaded."""
+    return {"sessions": session.list_sessions(), "base_dir": session.base_dir}
+
+
+@app.post("/api/sessions/load")
+def sessions_load(p: PresetIn):
+    """Restore the exact settings recorded when a past session was started."""
+    setup = session.read_setup(p.name)
+    if setup is None:
+        return {"ok": False, "error": "no saved config for that session"}
+    _apply_config(setup)
+    return {"ok": True, "loop": loop.status(), "tracker": tracker.settings(),
+            "camera": camera.status()}
 
 
 # --- calibration + light dose ---------------------------------------------

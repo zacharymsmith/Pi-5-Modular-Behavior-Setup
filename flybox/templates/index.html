@@ -303,6 +303,13 @@
         <button class="sm" onclick="loadPreset()">Load</button>
         <button class="sm" onclick="deletePreset()">Delete</button>
       </div>
+      <div style="margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Reload settings from a past session</div>
+      <div class="inline" style="gap:8px;margin-top:5px">
+        <select id="sessSel" style="flex:1"></select>
+        <button class="sm" onclick="loadSession()">Restore</button>
+        <button class="ghost sm" onclick="refreshSessions()">↻</button>
+      </div>
+      <small class="hint">Every session you start also auto-saves a preset of the same name — or restore straight from its folder here (set your Data folder below first).</small>
       <div style="margin-top:10px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Include when saving</div>
       <div class="inline" style="gap:14px;flex-wrap:wrap;margin-top:5px">
         <label class="chk"><input type="checkbox" class="psec" value="stim" checked> Stim</label>
@@ -680,8 +687,15 @@ function loadPreset(){const n=$('presetSel').value;if(!n)return;
   post('/api/presets/load',{name:n}).then(()=>{built=false;refresh();});}
 function deletePreset(){const n=$('presetSel').value;if(!n)return;
   post('/api/presets/delete',{name:n}).then(refreshPresets);}
+async function refreshSessions(){const r=await fetch('/api/sessions').then(x=>x.json());
+  const sel=$('sessSel'),cur=sel.value;
+  sel.innerHTML=(r.sessions&&r.sessions.length?r.sessions:['']).map(p=>`<option value="${p}">${p||'(no past sessions here)'}</option>`).join('');
+  if(cur)sel.value=cur;}
+function loadSession(){const n=$('sessSel').value;if(!n)return;
+  post('/api/sessions/load',{name:n}).then(r=>{
+    if(r&&r.ok===false){alert(r.error||'could not restore');return;} built=false;refresh();});}
 function setDataRoot(){post('/api/datadir',{path:$('dataRoot').value||null}).then(r=>{
-  if(!r.ok){alert(r.error||'failed');return;} refreshPresets();});}
+  if(!r.ok){alert(r.error||'failed');return;} refreshPresets();refreshSessions();});}
 
 // calibration
 function setCalib(){const v=parseFloat($('mmpp').value);
@@ -963,7 +977,7 @@ async function refresh(){
     fit();built=true;
   }
 }
-updateDuty();updateHint();refresh();refreshPresets();setInterval(refresh,1200);
+updateDuty();updateHint();refresh();refreshPresets();refreshSessions();setInterval(refresh,1200);
 window.addEventListener('load',fit);
 </script>
 </body>

@@ -79,6 +79,28 @@ class SessionLogger:
     def set_base_dir(self, path: str | None):
         self.base_dir = os.path.expanduser(path) if path else SESSIONS_DIR
 
+    def list_sessions(self) -> list:
+        """Past session folders (newest first) that hold a saved config.json."""
+        out = []
+        if self.base_dir and os.path.isdir(self.base_dir):
+            for d in sorted(os.listdir(self.base_dir), reverse=True):
+                if os.path.isfile(os.path.join(self.base_dir, d, "config.json")):
+                    out.append(d)
+        return out
+
+    def read_setup(self, name: str):
+        """The saved 'setup' config block from a past session (for reloading settings)."""
+        p = os.path.join(self.base_dir, _safe(name) if name else "", "config.json")
+        if not os.path.isfile(p):
+            p = os.path.join(self.base_dir, name, "config.json")   # exact folder name
+        if not os.path.isfile(p):
+            return None
+        try:
+            cfg = json.load(open(p))
+        except Exception:
+            return None
+        return cfg.get("setup") or cfg
+
     def start(self, name: str, meta: dict) -> str:
         with self._lock:
             if self.running:
