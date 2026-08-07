@@ -35,6 +35,7 @@ MIN_DUR, MAX_GAP = 3, 4       # sustained event >= ~3 s present, merge <= 4-samp
 MAX_EVENT_S = 120             # a real port visit is never minutes; longer = mis-placed patch, skip
 MAX_CLIP_FRAMES = 260         # never load more than this many frames for one clip (memory safety)
 DISP_W = 900                  # on-screen clip width (px)
+ZOOM_HW = 150                 # half-width (px) of the zoomed crop around the tip (see proboscis)
 CAP_COL = {"RIGHT": "#2a9d3f", "LEFT": "#c0392b"}
 
 
@@ -112,6 +113,7 @@ class Scorer:
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 5.0
         self.nframes = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
         self.frames = []; self.fidx = 0; self.cur = 0; self.delay = 110; self._anim = None
+        self.zoom = True                 # zoom into the tip so the proboscis is visible
         root.title(f"CAFE meal scorer — {self.video.name}")
         root.configure(bg="#0f1216")
         self.tips = self._load_tips()
@@ -256,6 +258,7 @@ class Scorer:
                                          width=16, command=cmd)
         mk2("⤺ Back (←)", self.back).pack(side="left", padx=6)
         mk2("⏩ Speed", self.speed).pack(side="left", padx=6)
+        mk2("🔍 Zoom", self.toggle_zoom).pack(side="left", padx=6)
         mk2("Next unscored »", self.jump_next).pack(side="left", padx=6)
         self.hint = tk.Label(self.root, text="Loops until you answer.  Y eat · N not · S skip · ← back",
                              fg="#9aa7b4", bg="#0f1216"); self.hint.pack(pady=(0, 10))
@@ -271,17 +274,30 @@ class Scorer:
     def load(self, i):
         if self._anim: self.root.after_cancel(self._anim); self._anim = None
         self.cur = max(0, min(i, len(self.events) - 1)); e = self.events[self.cur]
-        x0, y0, x1, y1 = TIPS[e["capillary"]]
+        x0, y0, x1, y1 = self.tips.get(e["capillary"], (0, 0, 50, 50))   # the box YOU drew
         s0 = max(0, int((e["start_s"] - PRE) * self.fps))
         n = min(int((e["dur"] + PRE + POST) * self.fps), MAX_CLIP_FRAMES)   # memory-safe cap
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, s0)
         self.frames = []
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2      # zoom crop centred on the tip patch
         for _ in range(n):
             ok, f = self.cap.read()
             if not ok: break
-            cv2.rectangle(f, (x0, y0), (x1, y1), (0, 255, 255), 2)
+            if self.zoom:                            # crop first, then mark only the CORNERS
+                H, W = f.shape[:2]
+                cx0, cy0 = max(0, cx - ZOOM_HW), max(0, cy - ZOOM_HW)
+                cx1c, cy1c = min(W, cx + ZOOM_HW), min(H, cy + ZOOM_HW)
+                f = f[cy0:cy1c, cx0:cx1c].copy()
+                bx0, by0, bx1, by1 = x0 - cx0, y0 - cy0, x1 - cx0, y1 - cy0
+                L = 11                               # corner ticks keep the centre clear (see proboscis)
+                for px, py, dx, dy in ((bx0, by0, 1, 1), (bx1, by0, -1, 1),
+                                       (bx0, by1, 1, -1), (bx1, by1, -1, -1)):
+                    cv2.line(f, (px, py), (px + dx*L, py), (0, 255, 255), 1)
+                    cv2.line(f, (px, py), (px, py + dy*L), (0, 255, 255), 1)
+            else:
+                cv2.rectangle(f, (x0, y0), (x1, y1), (0, 255, 255), 2)
             sc = DISP_W / f.shape[1]
-            f = cv2.resize(f, (DISP_W, int(f.shape[0] * sc)))
+            f = cv2.resize(f, (DISP_W, int(f.shape[0] * sc)), interpolation=cv2.INTER_NEAREST)
             self.frames.append(self._photo(f))
         self.fidx = 0
         lab = self.scores.get(e["id"], "")
@@ -308,6 +324,9 @@ class Scorer:
 
     def speed(self):
         self.delay = {110: 60, 60: 200, 200: 110}[self.delay]   # ~9 / ~16 / ~5 fps
+
+    def toggle_zoom(self):
+        self.zoom = not self.zoom; self.load(self.cur)          # re-render current clip
 
     # ---- scoring ----
     def mark(self, label):

@@ -1,0 +1,12 @@
+metric,RIGHT,LEFT
+bouts,12,11
+total_time_s,79.0,22.0
+mean_bout_s,6.6,2.0
+median_bout_s,4.0,1.0
+longest_bout_s,30.0,9.0
+meals_per_hour,12.0,11.0
+first_meal_min,3.4,2.5
+last_meal_min,58.8,57.9
+meniscus_receded_px,22.3,23.8
+preference_by_bouts,0.043,
+preference_by_time,0.564,
