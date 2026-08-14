@@ -17,7 +17,7 @@ REM 3) common install locations
 if not defined CBASE for %%P in (
   "%USERPROFILE%\anaconda3" "%USERPROFILE%\miniconda3" "%USERPROFILE%\miniforge3" "%USERPROFILE%\mambaforge"
   "%LOCALAPPDATA%\anaconda3" "%LOCALAPPDATA%\miniconda3" "%LOCALAPPDATA%\Continuum\anaconda3"
-  "%ProgramData%\anaconda3" "%ProgramData%\miniconda3"
+  "%ProgramData%\anaconda3" "%ProgramData%\miniconda3" "%ProgramData%\miniforge3" "%ProgramData%\mambaforge"
 ) do if exist "%%~P\Scripts\activate.bat" set "CBASE=%%~P"
 
 if not defined CBASE (
