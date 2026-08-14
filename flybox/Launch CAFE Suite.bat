@@ -1,28 +1,29 @@
 @echo off
-REM CAFE Analysis Suite - Windows launcher (conda). Explicitly activates conda, then
-REM creates/uses the "flybox-cafe" env from requirements.txt and launches the suite.
+REM CAFE Analysis Suite - Windows launcher (conda). Builds/uses the isolated env
+REM "flybox-cafe" from requirements.txt. Best run from the "Anaconda Prompt".
 setlocal
 cd /d "%~dp0"
 set "ENVNAME=flybox-cafe"
 echo Starting CAFE Analysis Suite...
 
-REM --- find the conda base (the folder that contains Scripts\activate.bat) ---
+REM --- locate conda base (folder that has Scripts\activate.bat) ---
 set "CBASE="
-for %%P in (
-  "%USERPROFILE%\anaconda3" "%USERPROFILE%\miniconda3"
-  "%USERPROFILE%\Anaconda3" "%USERPROFILE%\Miniconda3"
-  "%LOCALAPPDATA%\anaconda3" "%LOCALAPPDATA%\miniconda3"
+REM 1) conda already on PATH (e.g. Anaconda Prompt) -> ask conda itself
+where conda >nul 2>nul && for /f "delims=" %%i in ('conda info --base 2^>nul') do set "CBASE=%%i"
+REM 2) env vars set by an active conda
+if not defined CBASE if defined CONDA_PREFIX if exist "%CONDA_PREFIX%\Scripts\activate.bat" set "CBASE=%CONDA_PREFIX%"
+if not defined CBASE if defined CONDA_EXE for %%I in ("%CONDA_EXE%\..\..") do if exist "%%~fI\Scripts\activate.bat" set "CBASE=%%~fI"
+REM 3) common install locations
+if not defined CBASE for %%P in (
+  "%USERPROFILE%\anaconda3" "%USERPROFILE%\miniconda3" "%USERPROFILE%\miniforge3" "%USERPROFILE%\mambaforge"
+  "%LOCALAPPDATA%\anaconda3" "%LOCALAPPDATA%\miniconda3" "%LOCALAPPDATA%\Continuum\anaconda3"
   "%ProgramData%\anaconda3" "%ProgramData%\miniconda3"
 ) do if exist "%%~P\Scripts\activate.bat" set "CBASE=%%~P"
-REM fallback: derive base from CONDA_EXE if conda is already known to this shell
-if not defined CBASE if defined CONDA_EXE for %%I in ("%CONDA_EXE%\..\..") do (
-  if exist "%%~fI\Scripts\activate.bat" set "CBASE=%%~fI"
-)
 
 if not defined CBASE (
   echo.
   echo Could not locate conda automatically.
-  echo Open the "Anaconda Prompt", then run:
+  echo Easiest fix: open  "Anaconda Prompt"  ^(Start menu^), then run:
   echo     cd /d "%~dp0"
   echo     "Launch CAFE Suite.bat"
   echo.
@@ -30,10 +31,9 @@ if not defined CBASE (
   exit /b 1
 )
 
-REM --- activate conda (bootstraps it into this cmd session) ---
+echo Using conda at: %CBASE%
 call "%CBASE%\Scripts\activate.bat" || ( echo Could not activate conda. & pause & exit /b 1 )
 
-REM --- create the env once from requirements.txt ---
 conda env list | findstr /C:"%ENVNAME%" >nul 2>nul
 if errorlevel 1 goto CREATE
 goto ACTIVATE
