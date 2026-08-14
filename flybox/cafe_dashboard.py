@@ -16,7 +16,7 @@ LINES = {"LEFT":  ((560, 388), (392, 386)),
          "RIGHT": ((1216, 402), (1400, 404))}
 PORT_CROPS = {"LEFT":  (250, 260, 730, 500),      # x0,y0,x1,y1 around each capillary port
               "RIGHT": (1040, 260, 1520, 500)}
-COLS = {"LEFT": (60, 60, 200), "RIGHT": (60, 170, 60)}   # BGR for graph curves
+COLS = {"LEFT": (60, 60, 200), "RIGHT": (60, 170, 60), "CONTROL": (165, 110, 58)}   # BGR
 PANEL_H = 340
 
 
@@ -47,7 +47,7 @@ def meniscus(g, p0, p1, width=5, thr_frac=0.5, lo=0.0, hi=1.0):
     return np.nan
 
 
-def draw_graph(PW, PH, t, series, upto, ymax, meals):
+def draw_graph(PW, PH, t, series, upto, ymax, meals, ylab="meniscus receded (px)"):
     """cv2-drawn recession graph (both sides) revealed up to index `upto`. `series` is
     name -> (recession array, BGR colour)."""
     img = np.full((PH, PW, 3), 255, np.uint8)
@@ -60,7 +60,7 @@ def draw_graph(PW, PH, t, series, upto, ymax, meals):
     for gx in range(0, int(Tmax / 60) + 1, 20):
         cv2.line(img, (X(gx * 60), y0p), (X(gx * 60), y1p), (238, 238, 238), 1)
         cv2.putText(img, f"{gx}", (X(gx*60)-8, y1p+20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (120, 120, 120), 1)
-    cv2.putText(img, "meniscus receded (px)", (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (90, 90, 90), 1)
+    cv2.putText(img, ylab, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (90, 90, 90), 1)
     now_t = t[upto] if upto < len(t) else Tmax
     for cap_k, ms in meals:
         cv2.line(img, (X(ms), y0p), (X(ms), y1p),
@@ -126,9 +126,17 @@ def main():
     rec = {}
     for s in sides:
         p = np.array(pos[s], float); rec[s] = np.nan_to_num(p - np.nanmean(p[:3]), nan=0.0)
-    ymax = max(1.0, max(np.nanmax(rec[s]) for s in sides) * 1.15)
-    series = {s: (rec[s], COLS.get(s, (110, 110, 110))) for s in sides}
-    labels = {"LEFT": "LEFT port (control)", "RIGHT": "RIGHT port (fed)"}
+    # graph: if a no-fly CONTROL line is present, plot evaporation-corrected intake
+    # (fed - CONTROL); otherwise plot raw meniscus recession per side.
+    if "CONTROL" in rec:
+        gseries = {f"{fed}-ctrl": (rec[fed] - rec["CONTROL"], COLS.get(fed, (110, 110, 110)))
+                   for fed in ("RIGHT", "LEFT") if fed in rec}
+        ylab = "intake (px): fed - CONTROL"
+    else:
+        gseries = {s: (rec[s], COLS.get(s, (110, 110, 110))) for s in sides}
+        ylab = "meniscus receded (px)"
+    ymax = max(1.0, max(np.nanmax(v[0]) for v in gseries.values()) * 1.15)
+    labels = {"LEFT": "LEFT port (fed)", "RIGHT": "RIGHT port (fed)", "CONTROL": "CONTROL (no fly)"}
 
     def panel(crop, label, col):
         h, w = crop.shape[:2]; vp = cv2.resize(crop, (int(w * PANEL_H / h), PANEL_H))
@@ -140,7 +148,7 @@ def main():
     for i in range(len(t)):
         panels = [panel(crops[s][i], labels.get(s, f"{s} port"),
                         tuple(int(c) for c in COLS.get(s, (110, 110, 110)))) for s in sides]
-        panels.append(draw_graph(PW, PANEL_H, t, series, i, ymax, meals))
+        panels.append(draw_graph(PW, PANEL_H, t, gseries, i, ymax, meals, ylab))
         vw.write(np.hstack(panels))
     vw.release()
     # re-encode to browser-friendly H.264

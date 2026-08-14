@@ -103,7 +103,7 @@ class MenGUI:
         self.fscrub.pack(side="left", padx=6)
         tk.Checkbutton(bar, text="Brighten", command=self._toggle_bright).pack(side="left")
         tk.Label(bar, text="  Name").pack(side="left")
-        self.name = ttk.Combobox(bar, values=["RIGHT", "LEFT"], width=8); self.name.set("RIGHT")
+        self.name = ttk.Combobox(bar, values=["RIGHT", "LEFT", "CONTROL"], width=9); self.name.set("RIGHT")
         self.name.pack(side="left")
         tk.Button(bar, text="Add line", command=self._add_line).pack(side="left", padx=4)
         tk.Button(bar, text="Track over time ▶", command=self._track).pack(side="left", padx=4)
@@ -216,29 +216,41 @@ class MenGUI:
                                 ln["lo"]*L, ln["hi"]*L, every=25)
             results[nm] = (t, pos)
         fig, ax = plt.subplots(figsize=(11, 4.5))
-        col = {"RIGHT": "#2a9d3f", "LEFT": "#c0392b"}
+        col = {"RIGHT": "#2a9d3f", "LEFT": "#c0392b", "CONTROL": "#3a6ea5"}
         rec = {}                                       # +ve px = meniscus receded (liquid gone)
         for nm, (t, pos) in results.items():
             rec[nm] = pos - np.nanmean(pos[:3])
             ax.plot(t/60, rec[nm], lw=2, color=col.get(nm), label=nm)
-        # evaporation-corrected intake: RIGHT minus LEFT (the left tube is the evap control)
-        if "RIGHT" in results and "LEFT" in results:
-            net = rec["RIGHT"] - rec["LEFT"]
-            ax.plot(results["RIGHT"][0]/60, net, "k--", lw=2, label="RIGHT − LEFT (net intake)")
+        tref = results[list(results)[0]][0]
+        # evaporation-corrected intake. Prefer a true no-fly CONTROL capillary; if there is
+        # no CONTROL, fall back to RIGHT-LEFT (LEFT as a rough evaporation proxy).
+        intakes = {}
+        if "CONTROL" in rec:
+            for fed in ("RIGHT", "LEFT"):
+                if fed in rec:
+                    intakes[f"{fed}_intake"] = rec[fed] - rec["CONTROL"]
+                    ax.plot(tref/60, rec[fed] - rec["CONTROL"], "--", lw=2, color=col.get(fed),
+                            label=f"{fed} − CONTROL (intake)")
+            note = "intake = fed − CONTROL (no-fly capillary)"
+        elif "RIGHT" in rec and "LEFT" in rec:
+            intakes["net_intake"] = rec["RIGHT"] - rec["LEFT"]
+            ax.plot(tref/60, rec["RIGHT"] - rec["LEFT"], "k--", lw=2, label="RIGHT − LEFT (net intake)")
+            note = "net = RIGHT − LEFT (LEFT as evap proxy)"
+        else:
+            note = ""
         with open(f"{base}_meniscus.csv", "w", newline="") as fh:
             w = csv.writer(fh); names = list(results)
-            head = ["t_s"] + [f"{n}_pos_px" for n in names] + [f"{n}_receded_px" for n in names]
-            if "RIGHT" in rec and "LEFT" in rec: head.append("net_intake_px")
+            head = ["t_s"] + [f"{n}_pos_px" for n in names] + [f"{n}_receded_px" for n in names] \
+                   + [f"{k}_px" for k in intakes]
             w.writerow(head)
-            t0 = results[names[0]][0]
-            for i in range(len(t0)):
-                r = [round(t0[i], 1)] + [round(float(results[n][1][i]), 2) for n in names] \
-                    + [round(float(rec[n][i]), 2) for n in names]
-                if "RIGHT" in rec and "LEFT" in rec: r.append(round(float(rec["RIGHT"][i]-rec["LEFT"][i]), 2))
+            for i in range(len(tref)):
+                r = [round(tref[i], 1)] + [round(float(results[n][1][i]), 2) for n in names] \
+                    + [round(float(rec[n][i]), 2) for n in names] \
+                    + [round(float(intakes[k][i]), 2) for k in intakes]
                 w.writerow(r)
         ax.set_xlabel("time (min)")
         ax.set_ylabel("meniscus receded (px)  ·  higher = more liquid gone")
-        ax.set_title(f"Meniscus — {self.video.name}  (RIGHT−LEFT removes evaporation)")
+        ax.set_title(f"Meniscus — {self.video.name}" + (f"  ({note})" if note else ""))
         ax.legend(); ax.grid(alpha=.3)
         fig.tight_layout(); fig.savefig(f"{base}_meniscus.png", dpi=120); plt.close(fig)
         self.status.config(text=f"saved {base.name}_meniscus.png + .csv  ({len(self.lines)} line(s))",

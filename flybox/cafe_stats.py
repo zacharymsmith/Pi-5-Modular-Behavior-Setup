@@ -52,11 +52,18 @@ def main():
     if mp.exists():
         rows = list(csv.DictReader(open(mp)))
         def col(c): return np.array([float(r[c]) for r in rows]) if c in rows[0] else None
-        for k in sides:
+        def endval(arr): return float(np.nanmedian(arr[-5:])) if arr is not None else None
+        for k in sides + ["CONTROL"]:
             rec = col(f"{k}_receded_px")
-            if rec is not None: men[k] = float(np.nanmedian(rec[-5:]))
-        net = col("net_intake_px")
-        if net is not None: men["net_intake_px"] = float(np.nanmedian(net[-5:]))
+            if rec is not None: men[k] = endval(rec)
+        # evaporation-corrected intake per fed side: prefer explicit *_intake_px columns,
+        # else fed - CONTROL, else fall back to the RIGHT-LEFT net
+        for k in sides:
+            iv = endval(col(f"{k}_intake_px"))
+            if iv is None and "CONTROL" in men and k in men: iv = men[k] - men["CONTROL"]
+            if iv is not None: men[f"{k}_intake"] = iv
+        net = endval(col("net_intake_px"))
+        if net is not None: men["net_intake_px"] = net
 
     # ---- print ----
     print(f"\n===== CAFE stats — {Path(a.video).name}  ({dur_min:.1f} min) =====")
@@ -70,12 +77,22 @@ def main():
     print(f"preference (RIGHT vs LEFT):  by bouts {pref_count:+.2f}   by time {pref_time:+.2f}   "
           f"(+1=all right, -1=all left)")
     if men:
-        r, l = men.get("RIGHT"), men.get("LEFT")
-        print(f"meniscus receded:  RIGHT {r:.1f}px  LEFT {l:.1f}px  net(R-L) {men.get('net_intake_px',0):.1f}px")
+        r, l, c = men.get("RIGHT", 0), men.get("LEFT", 0), men.get("CONTROL")
+        line = f"meniscus receded:  RIGHT {r:.1f}px  LEFT {l:.1f}px"
+        if c is not None: line += f"  CONTROL {c:.1f}px"
+        print(line)
+        ri, li = men.get("RIGHT_intake"), men.get("LEFT_intake")
+        if ri is not None or li is not None:
+            print(f"evap-corrected intake (fed - CONTROL):  RIGHT {ri or 0:.1f}px  LEFT {li or 0:.1f}px")
+        elif "net_intake_px" in men:
+            print(f"net intake (R - L):  {men['net_intake_px']:.1f}px")
         if a.mm_per_px and a.bore_mm:
             area = np.pi * (a.bore_mm/2)**2
-            print(f"volume:  RIGHT {r*a.mm_per_px*area:.3f} µL  LEFT {l*a.mm_per_px*area:.3f} µL  "
-                  f"net {men.get('net_intake_px',0)*a.mm_per_px*area:+.3f} µL")
+            uL = lambda px: px * a.mm_per_px * area
+            if ri is not None or li is not None:
+                print(f"volume intake (evap-corrected):  RIGHT {uL(ri or 0):.3f} µL  LEFT {uL(li or 0):.3f} µL")
+            else:
+                print(f"volume receded:  RIGHT {uL(r):.3f} µL  LEFT {uL(l):.3f} µL")
 
     # ---- save CSV ----
     with open(f"{base}_stats.csv", "w", newline="") as fh:
@@ -83,7 +100,11 @@ def main():
         for key in ["bouts", "total_time_s", "mean_bout_s", "median_bout_s", "longest_bout_s",
                     "meals_per_hour", "first_meal_min", "last_meal_min"]:
             w.writerow([key, S["RIGHT"][key], S["LEFT"][key]])
-        if men: w.writerow(["meniscus_receded_px", round(men.get("RIGHT", 0), 1), round(men.get("LEFT", 0), 1)])
+        if men:
+            w.writerow(["meniscus_receded_px", round(men.get("RIGHT", 0), 1), round(men.get("LEFT", 0), 1)])
+            if "CONTROL" in men: w.writerow(["control_receded_px", round(men["CONTROL"], 1), ""])
+            if "RIGHT_intake" in men or "LEFT_intake" in men:
+                w.writerow(["intake_px_evapcorr", round(men.get("RIGHT_intake", 0), 1), round(men.get("LEFT_intake", 0), 1)])
         w.writerow(["preference_by_bouts", pref_count, ""])
         w.writerow(["preference_by_time", pref_time, ""])
 
@@ -99,9 +120,14 @@ def main():
         ax[i].set_title(title); ax[i].grid(axis="y", alpha=.3)
         for j, k in enumerate(sides): ax[i].text(j, S[k][key], f"{S[k][key]:g}", ha="center", va="bottom")
     if men:
-        vals = [men.get("RIGHT", 0), men.get("LEFT", 0)]
+        if "RIGHT_intake" in men or "LEFT_intake" in men:
+            vals = [men.get("RIGHT_intake", 0), men.get("LEFT_intake", 0)]
+            title = "intake (px)\n(evap-corrected: fed - CONTROL)"
+        else:
+            vals = [men.get("RIGHT", 0), men.get("LEFT", 0)]
+            title = "meniscus receded (px)\n(evaporation-dominated)"
         ax[3].bar(sides, vals, color=[col[k] for k in sides])
-        ax[3].set_title("meniscus receded (px)\n(evaporation-dominated)"); ax[3].grid(axis="y", alpha=.3)
+        ax[3].set_title(title); ax[3].grid(axis="y", alpha=.3)
         for j, v in enumerate(vals): ax[3].text(j, v, f"{v:.1f}", ha="center", va="bottom")
     fig.suptitle(f"CAFE stats — {Path(a.video).name}  ·  {dur_min:.0f} min", weight="bold")
     fig.tight_layout(); fig.savefig(f"{base}_stats.png", dpi=120)
