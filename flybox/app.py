@@ -23,6 +23,7 @@ from tracker import Tracker
 from closed_loop import ClosedLoop
 from session import logger as session
 from scheduler import Scheduler
+from sensors import sensors
 import presets
 
 app = FastAPI(title="FlyBox Controller")
@@ -239,9 +240,26 @@ def _idle_watchdog():
             return
 
 
+def _enviro_poll():
+    """Sample the environmental stick; during a session log every reading to enviro.csv
+    and push any incidents (light spike, temp/humidity excursion, rig bump) onto the
+    events timeline so they line up with the behaviour data."""
+    while True:
+        try:
+            r = sensors.read()
+            if r and session.running:
+                session.log_enviro(r)
+                for kind, detail in sensors.incidents(r):
+                    session.log_event("enviro", kind, {}, detail)
+        except Exception:
+            pass
+        time.sleep(config.ENVIRO_POLL_S)
+
+
 @app.on_event("startup")
 def _start_watchdog():
     threading.Thread(target=_idle_watchdog, daemon=True).start()
+    threading.Thread(target=_enviro_poll, daemon=True).start()
 
 
 @app.post("/api/quit")
@@ -266,6 +284,7 @@ def status():
         "loop": loop.status(),
         "session": session.status(),
         "scheduler": scheduler.status(),
+        "enviro": sensors.status(),
         "irradiance": config.OPTO_IRRADIANCE_MW_CM2,
         "paths": {"presets_dir": presets.current_dir(),
                   "sessions_dir": session.base_dir},

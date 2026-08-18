@@ -61,6 +61,8 @@ class SessionLogger:
     TRACK_COLS = ["t_s", "frame", "id", "x_px", "y_px", "x_mm", "y_mm",
                   "vx_px", "vy_px", "speed_px", "angle_deg", "major_px", "minor_px",
                   "coasting"]
+    ENVIRO_COLS = ["t_iso", "t_s", "temp_C", "humidity_pct", "pressure_hPa",
+                   "lux", "prox", "accel_g"]
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -71,8 +73,8 @@ class SessionLogger:
         self.t0 = 0.0
         self.n_events = 0
         self.n_track_rows = 0
-        self._ev_f = self._tr_f = None
-        self._ev = self._tr = None
+        self._ev_f = self._tr_f = self._en_f = None
+        self._ev = self._tr = self._en = None
         self._meta = {}
         self._frame0 = None
 
@@ -123,8 +125,21 @@ class SessionLogger:
             self._tr_f = open(os.path.join(self.dir, "tracks.csv"), "w", newline="")
             self._tr = csv.DictWriter(self._tr_f, fieldnames=self.TRACK_COLS)
             self._tr.writeheader()
+            self._en_f = open(os.path.join(self.dir, "enviro.csv"), "w", newline="")
+            self._en = csv.DictWriter(self._en_f, fieldnames=self.ENVIRO_COLS)
+            self._en.writeheader()
             self.running = True
             return self.dir
+
+    def log_enviro(self, r: dict):
+        """One environmental sample (temp/humidity/pressure/lux/prox/accel) to enviro.csv."""
+        with self._lock:
+            if not self.running or not r:
+                return
+            row = {"t_iso": datetime.now().isoformat(), "t_s": round(time.time() - self.t0, 3)}
+            for k in self.ENVIRO_COLS[2:]:
+                row[k] = r.get(k)
+            self._en.writerow(row); self._en_f.flush()
 
     def log_event(self, source: str, channel: str, proto: dict, detail: str = ""):
         with self._lock:
@@ -177,7 +192,7 @@ class SessionLogger:
             self.running = False
             d = self.dir
             dur = round(time.time() - self.t0, 1)
-            for f in (self._ev_f, self._tr_f):
+            for f in (self._ev_f, self._tr_f, self._en_f):
                 try:
                     f.close()
                 except Exception:
