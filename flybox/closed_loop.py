@@ -61,9 +61,11 @@ class ClosedLoop:
 
     # ---- per-frame -----------------------------------------------------
     def on_frame(self, frame_bgr):
-        # run tracking whenever it's needed: the user enabled the overlay, OR the closed
-        # loop is armed (so opto fires), OR a session is recording (so tracks are logged)
-        if not (self.tracker.enabled or self.enabled or session.running):
+        # tracking is controlled by the toggle ONLY: run it when the user enabled the overlay
+        # OR the closed loop is armed (opto needs positions). It does NOT force on during a
+        # session — so you can switch tracking OFF mid-recording to recover fps (e.g. CAFE
+        # runs analysed offline). Tracks are logged only while tracking is actually running.
+        if not (self.tracker.enabled or self.enabled):
             return frame_bgr
         annotated, tracks = self.tracker.process(frame_bgr)
         h, w = frame_bgr.shape[:2]
