@@ -1,5 +1,26 @@
-# CAFE analysis suite — Python dependencies (tkinter ships with conda's python)
-opencv-python
-numpy
-pillow
-matplotlib
+# FlyBox Pi app dependencies — installed on the Raspberry Pi by setup.sh.
+# (The CAFE analysis-suite deps for Mac/Windows live in requirements-analysis.txt.)
+
+# Web service
+fastapi
+uvicorn[standard]
+pydantic
+
+# Hardware (Pi 5) — safe to omit when developing off-Pi
+adafruit-circuitpython-pca9685   # PCA9685 (strips + opto)
+adafruit-blinka                  # board/busio backing for CircuitPython libs
+lgpio                            # GPIO backend Blinka uses on the Pi 5
+
+# Environmental watchdog — Pimoroni Multi-Sensor Stick (I2C)
+pimoroni-bme280                  # BME280 temp/pressure/humidity  (NOT the generic 'bme280'!)
+ltr559                           # LTR-559 light + proximity
+lsm6ds3                          # LSM6DS3 accel + gyro
+smbus2                           # raw I2C access
+
+# picamera2 is NOT pip-installed here — install via apt on the Pi:
+#   sudo apt install -y python3-picamera2
+#
+# IMPORTANT: do NOT pip-install numpy or opencv here. picamera2 (apt) is compiled
+# against the SYSTEM numpy; a pip numpy causes an ABI clash and picamera2/opencv
+# fail to import ("numpy.dtype size changed"). setup.sh installs python3-numpy +
+# python3-opencv via apt instead.

@@ -1,0 +1,6 @@
+# CAFE analysis suite (Mac / Windows) — installed into the conda env by the
+# "Launch CAFE Suite" launchers. NOT for the Raspberry Pi (see requirements.txt).
+opencv-python
+numpy
+pillow
+matplotlib

@@ -11,7 +11,9 @@ Purpose: flag INCIDENTS that could confound behaviour data —
   * physical bumps / vibration (accel jolt on the IMU)     -> motion artifacts, jostled rig
 so they land on the same timeline as feeding/opto events and you can spot cause-and-effect.
 
-Pi libraries (install once): pip install bme280 ltr559 lsm6ds3 smbus2
+Pi libraries (install once, into SYSTEM python3):
+    pip3 install --break-system-packages pimoroni-bme280 ltr559 lsm6ds3 smbus2
+NOTE: it's **pimoroni-bme280** (provides the BME280 class), NOT the generic 'bme280' package.
 """
 from __future__ import annotations
 import time

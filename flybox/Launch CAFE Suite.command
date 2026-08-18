@@ -29,7 +29,7 @@ else
   echo "Creating conda env '$ENVNAME' (one time, ~1-2 min)..."
   conda create -y -n "$ENVNAME" python=3.11 || { echo "env create failed"; read -n1 -r; exit 1; }
   conda activate "$ENVNAME"
-  python -m pip install -r requirements.txt || { echo "dependency install failed"; read -n1 -r; exit 1; }
+  python -m pip install -r requirements-analysis.txt || { echo "dependency install failed"; read -n1 -r; exit 1; }
 fi
 
 echo "Launching in conda env '$ENVNAME'..."

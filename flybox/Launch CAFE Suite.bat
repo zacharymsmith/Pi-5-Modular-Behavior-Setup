@@ -42,7 +42,7 @@ goto ACTIVATE
 echo Creating conda env "%ENVNAME%" ^(one time, ~1-2 min^)...
 call conda create -y -n %ENVNAME% python=3.11 || ( echo env create failed & pause & exit /b 1 )
 call conda activate %ENVNAME% || ( echo could not activate %ENVNAME% & pause & exit /b 1 )
-python -m pip install -r requirements.txt || ( echo dependency install failed & pause & exit /b 1 )
+python -m pip install -r requirements-analysis.txt || ( echo dependency install failed & pause & exit /b 1 )
 goto LAUNCH
 
 :ACTIVATE
