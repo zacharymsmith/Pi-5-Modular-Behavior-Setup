@@ -247,10 +247,12 @@ def _enviro_poll():
     while True:
         try:
             r = sensors.read()
-            if r and session.running:
-                session.log_enviro(r)
-                for kind, detail in sensors.incidents(r):
-                    session.log_event("enviro", kind, {}, detail)
+            if r:
+                inc = sensors.incidents(r)              # track incidents live (for the UI banner)
+                if session.running:
+                    session.log_enviro(r)
+                    for kind, detail in inc:
+                        session.log_event("enviro", kind, {}, detail)
         except Exception:
             pass
         time.sleep(config.ENVIRO_POLL_S)

@@ -530,6 +530,22 @@
         </div>
       </details>
     </section>
+
+    <section class="card" id="enviroCard">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <h2>Environment</h2><span class="sub" id="enviroMsg">—</span>
+      </div>
+      <div class="inline" id="enviroReadout" style="gap:16px;flex-wrap:wrap;margin:8px 2px"></div>
+      <div class="inline" id="enviroToggles" style="gap:12px;flex-wrap:wrap;margin:4px 2px 10px"></div>
+      <canvas id="enviroChart" height="180"
+              style="width:100%;height:180px;background:#0c0f13;border-radius:8px;display:block"></canvas>
+      <div class="sub" style="margin-top:10px">Recent incidents</div>
+      <div id="enviroIncidents" class="hint">none</div>
+      <div class="rowbtns" style="margin-top:8px;align-items:center">
+        <button class="ghost sm" onclick="enviroDownload()">Download buffer CSV</button>
+        <span class="hint">Auto-logs to <code>enviro.csv</code> while a session records.</span>
+      </div>
+    </section>
   </div>
 </main>
 
@@ -830,6 +846,64 @@ function updateMethodUI(){const m=$('method').value;
   $('grpTophat').style.display=(m==='tophat')?'':'none';
   $('grpThresh').style.display=(m==='threshold')?'':'none';}
 
+// ---- environment (live strip chart) ----
+const ENVIRO_METRICS=[
+  {key:'temp_C',label:'Temp °C',color:'#e8894a'},
+  {key:'humidity_pct',label:'Humidity %',color:'#3a86ff'},
+  {key:'lux',label:'Light lux',color:'#e0c020'},
+  {key:'pressure_hPa',label:'Pressure hPa',color:'#a06ee0'},
+  {key:'accel_g',label:'Accel g',color:'#e05a5a'},
+];
+const enviroOn={temp_C:true,humidity_pct:true,lux:true,pressure_hPa:false,accel_g:false};
+let enviroBuf=[];
+function updateEnviro(e){
+  if(!e){return;}
+  $('enviroMsg').textContent=e.message||'';
+  const lat=e.latest||{};
+  if(lat.temp_C!=null||lat.lux!=null||lat.humidity_pct!=null){
+    enviroBuf.push({t:Date.now(),...lat}); if(enviroBuf.length>600)enviroBuf.shift();
+  }
+  $('enviroReadout').innerHTML=ENVIRO_METRICS.map(m=>{
+    const v=lat[m.key]; if(v==null)return '';
+    return `<span style="color:${m.color}">●</span> <b>${m.label.split(' ')[0]}</b> ${v}${m.label.includes('%')?'%':''}`;
+  }).filter(Boolean).join('&nbsp;&nbsp;&nbsp;')||'<span class=hint>no readings — sensor on i2c bus 3</span>';
+  const tg=$('enviroToggles');
+  if(!tg.dataset.built){
+    tg.innerHTML=ENVIRO_METRICS.map(m=>
+      `<label class="chk"><input type="checkbox" ${enviroOn[m.key]?'checked':''} onchange="enviroOn['${m.key}']=this.checked;drawEnviroChart()"> <span style="color:${m.color}">${m.label}</span></label>`).join('');
+    tg.dataset.built='1';
+  }
+  drawEnviroChart();
+  const inc=e.recent||[];
+  $('enviroIncidents').innerHTML=inc.length?inc.map(i=>{
+    const ago=Math.max(0,Math.round(Date.now()/1000-i.t));
+    return `⚠ <b>${i.kind}</b> — ${i.detail} <span class=hint>(${ago}s ago)</span>`;}).join('<br>'):'none';
+}
+function drawEnviroChart(){
+  const c=$('enviroChart'); if(!c)return; const ctx=c.getContext('2d');
+  const W=c.width=c.clientWidth||640, H=c.height; ctx.clearRect(0,0,W,H);
+  const buf=enviroBuf, n=buf.length; if(n<2)return;
+  ENVIRO_METRICS.forEach(m=>{
+    if(!enviroOn[m.key])return;
+    const vals=buf.map(b=>b[m.key]).filter(v=>v!=null&&!isNaN(v));
+    if(vals.length<2)return;
+    let lo=Math.min(...vals),hi=Math.max(...vals); if(hi-lo<1e-6){lo-=1;hi+=1;}
+    ctx.strokeStyle=m.color; ctx.lineWidth=1.6; ctx.beginPath(); let started=false;
+    for(let i=0;i<n;i++){const v=buf[i][m.key]; if(v==null||isNaN(v))continue;
+      const x=W*i/(n-1), y=H-8-(H-16)*(v-lo)/(hi-lo);
+      started?ctx.lineTo(x,y):ctx.moveTo(x,y); started=true;}
+    ctx.stroke();
+  });
+}
+function enviroDownload(){
+  if(!enviroBuf.length){alert('No environment data buffered yet.');return;}
+  const keys=['t','temp_C','humidity_pct','pressure_hPa','lux','prox','accel_g'];
+  const rows=[keys.join(',')].concat(enviroBuf.map(b=>keys.map(k=>k==='t'?new Date(b.t).toISOString():(b[k]??'')).join(',')));
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'}));
+  a.download='enviro_buffer.csv'; a.click();
+}
+
 // status
 let built=false, lastCamKey='';
 function proto1(p){return `${p.frequency_hz}Hz · ${p.pulse_width_ms}ms · ${p.train_duration_s}s`;}
@@ -843,6 +917,7 @@ async function refresh(){
   buildCamModes(s);   // auto-populate resolution list for the detected sensor
   $('chipPca').innerHTML=badge(s.opto.hw)+'PCA9685 <b>'+(s.opto.hw?'linked':'mock')+'</b>';
   $('chipFps').innerHTML='<b>'+(s.camera.fps||0)+'</b> fps';
+  updateEnviro(s.enviro);
   // only warn / offer retry when there's NO real camera (not for the test toggle)
   $('camMsg').textContent=s.camera.camera_present?'':s.camera.message;
   $('camRetry').style.display=s.camera.camera_present?'none':'inline-block';

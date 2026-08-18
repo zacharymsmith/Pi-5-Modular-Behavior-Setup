@@ -16,6 +16,7 @@ Pi libraries (install once): pip install bme280 ltr559 lsm6ds3 smbus2
 from __future__ import annotations
 import time
 import threading
+from collections import deque
 
 from config import (SENSOR_I2C_BUS, ENVIRO_POLL_S, TEMP_BAND_C, HUM_BAND_PCT,
                     LUX_JUMP_FRAC, BUMP_G)
@@ -28,6 +29,7 @@ class EnviroStick:
         self._bme = self._ltr = self._imu = None
         self.latest: dict = {}
         self._prev: dict = {}
+        self._recent = deque(maxlen=8)      # recent incidents for the UI banner
         self._lock = threading.Lock()
         try:
             from smbus2 import SMBus
@@ -96,11 +98,14 @@ class EnviroStick:
             out.append(("bump", f"accel {r['accel_g']:.2f} g (rig disturbed)"))
         if r:
             self._prev = dict(r)
+        for kind, detail in out:
+            self._recent.appendleft({"t": time.time(), "kind": kind, "detail": detail})
         return out
 
     def status(self) -> dict:
         with self._lock:
-            return {"hw": self.hw, "message": self.message, "latest": dict(self.latest)}
+            return {"hw": self.hw, "message": self.message, "latest": dict(self.latest),
+                    "recent": list(self._recent)}
 
 
 sensors = EnviroStick()
