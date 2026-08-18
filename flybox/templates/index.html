@@ -537,8 +537,7 @@
       </div>
       <div class="inline" id="enviroReadout" style="gap:16px;flex-wrap:wrap;margin:8px 2px"></div>
       <div class="inline" id="enviroToggles" style="gap:12px;flex-wrap:wrap;margin:4px 2px 10px"></div>
-      <canvas id="enviroChart" height="180"
-              style="width:100%;height:180px;background:#0c0f13;border-radius:8px;display:block"></canvas>
+      <div id="enviroPanels"></div>
       <div class="sub" style="margin-top:10px">Recent incidents</div>
       <div id="enviroIncidents" class="hint">none</div>
       <div class="rowbtns" style="margin-top:8px;align-items:center">
@@ -870,30 +869,54 @@ function updateEnviro(e){
   const tg=$('enviroToggles');
   if(!tg.dataset.built){
     tg.innerHTML=ENVIRO_METRICS.map(m=>
-      `<label class="chk"><input type="checkbox" ${enviroOn[m.key]?'checked':''} onchange="enviroOn['${m.key}']=this.checked;drawEnviroChart()"> <span style="color:${m.color}">${m.label}</span></label>`).join('');
+      `<label class="chk"><input type="checkbox" ${enviroOn[m.key]?'checked':''} onchange="enviroOn['${m.key}']=this.checked;renderEnviroPanels()"> <span style="color:${m.color}">${m.label}</span></label>`).join('');
     tg.dataset.built='1';
   }
-  drawEnviroChart();
+  renderEnviroPanels();
   const inc=e.recent||[];
   $('enviroIncidents').innerHTML=inc.length?inc.map(i=>{
     const ago=Math.max(0,Math.round(Date.now()/1000-i.t));
     return `⚠ <b>${i.kind}</b> — ${i.detail} <span class=hint>(${ago}s ago)</span>`;}).join('<br>'):'none';
 }
-function drawEnviroChart(){
-  const c=$('enviroChart'); if(!c)return; const ctx=c.getContext('2d');
-  const W=c.width=c.clientWidth||640, H=c.height; ctx.clearRect(0,0,W,H);
-  const buf=enviroBuf, n=buf.length; if(n<2)return;
-  ENVIRO_METRICS.forEach(m=>{
-    if(!enviroOn[m.key])return;
-    const vals=buf.map(b=>b[m.key]).filter(v=>v!=null&&!isNaN(v));
-    if(vals.length<2)return;
-    let lo=Math.min(...vals),hi=Math.max(...vals); if(hi-lo<1e-6){lo-=1;hi+=1;}
-    ctx.strokeStyle=m.color; ctx.lineWidth=1.6; ctx.beginPath(); let started=false;
-    for(let i=0;i<n;i++){const v=buf[i][m.key]; if(v==null||isNaN(v))continue;
-      const x=W*i/(n-1), y=H-8-(H-16)*(v-lo)/(hi-lo);
-      started?ctx.lineTo(x,y):ctx.moveTo(x,y); started=true;}
-    ctx.stroke();
+// Task-Manager-style: one small chart per enabled metric, each with its own axis.
+function renderEnviroPanels(){
+  const host=$('enviroPanels'); if(!host)return;
+  const on=ENVIRO_METRICS.filter(m=>enviroOn[m.key]);
+  const key=on.map(m=>m.key).join(',');
+  if(host.dataset.key!==key){
+    host.innerHTML=on.map(m=>`<canvas class="epc" data-k="${m.key}" height="76" style="width:100%;height:76px;display:block;background:#0c0f13;border-radius:8px;margin-bottom:8px"></canvas>`).join('')
+      || '<span class="hint">Tick a metric above to chart it.</span>';
+    host.dataset.key=key;
+  }
+  on.forEach(m=>{const c=host.querySelector(`canvas[data-k="${m.key}"]`); if(c)drawMetric(c,m);});
+}
+function drawMetric(c,m){
+  const ctx=c.getContext('2d'); const W=c.width=c.clientWidth||600, H=c.height; ctx.clearRect(0,0,W,H);
+  const pts=[]; for(let i=0;i<enviroBuf.length;i++){const v=enviroBuf[i][m.key]; if(v!=null&&!isNaN(v))pts.push([i,v]);}
+  const cur=pts.length?pts[pts.length-1][1]:null;
+  const padL=46,padR=8,padT=17,padB=13;
+  let ys=pts.map(p=>p[1]), lo=Math.min(...ys), hi=Math.max(...ys);
+  if(!isFinite(lo)||!isFinite(hi)){lo=0;hi=1;}
+  if(hi-lo<1e-6){lo-=0.5;hi+=0.5;} else {const pd=(hi-lo)*0.18; lo-=pd; hi+=pd;}
+  const X=i=>padL+(W-padL-padR)*(enviroBuf.length<2?0:i/(enviroBuf.length-1));
+  const Y=v=>padT+(H-padT-padB)*(1-(v-lo)/(hi-lo));
+  const dec=v=>Math.abs(v)<10?v.toFixed(2):(Math.abs(v)<100?v.toFixed(1):v.toFixed(0));
+  // axes + min/mid/max gridlines with numbers
+  ctx.strokeStyle='#20262e'; ctx.lineWidth=1; ctx.fillStyle='#7a8794'; ctx.font='10px system-ui'; ctx.textAlign='right';
+  [[hi,padT],[(hi+lo)/2,(padT+H-padB)/2],[lo,H-padB]].forEach(([val,y])=>{
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillText(dec(val), padL-4, y+3);
   });
+  // title + current value
+  ctx.textAlign='left'; ctx.fillStyle=m.color; ctx.font='bold 12px system-ui'; ctx.fillText(m.label, padL+2, 12);
+  if(cur!=null){ctx.textAlign='right'; ctx.font='bold 15px system-ui'; ctx.fillStyle='#e8eef5'; ctx.fillText(dec(cur), W-padR, 13);}
+  if(pts.length<2)return;
+  // filled area + line
+  ctx.beginPath(); pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.lineTo(X(pts[pts.length-1][0]),H-padB); ctx.lineTo(X(pts[0][0]),H-padB); ctx.closePath();
+  ctx.fillStyle=m.color+'22'; ctx.fill();
+  ctx.beginPath(); pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.strokeStyle=m.color; ctx.lineWidth=1.7; ctx.stroke();
 }
 function enviroDownload(){
   if(!enviroBuf.length){alert('No environment data buffered yet.');return;}
