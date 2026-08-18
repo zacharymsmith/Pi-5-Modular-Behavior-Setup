@@ -135,7 +135,7 @@ check_py uvicorn      "uvicorn"            "pip install --break-system-packages 
 check_py picamera2    "picamera2"          "sudo apt install python3-picamera2 (use system python3)"
 check_py cv2          "opencv (cv2)"       "sudo apt install python3-opencv"
 check_py numpy        "numpy"              "sudo apt install python3-numpy"
-check_py adafruit_pca9685 "adafruit PCA9685" "pip install --break-system-packages adafruit-circuitpython-pca9685 adafruit-blinka"
+check_py smbus2       "smbus2 (I2C: PCA9685 + sensor)" "pip install --break-system-packages smbus2"
 
 # App self-test: import modules and report mock vs real hardware
 echo

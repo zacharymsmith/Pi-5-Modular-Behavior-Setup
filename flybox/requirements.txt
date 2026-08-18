@@ -6,16 +6,16 @@ fastapi
 uvicorn[standard]
 pydantic
 
-# Hardware (Pi 5) — safe to omit when developing off-Pi
-adafruit-circuitpython-pca9685   # PCA9685 (strips + opto)
-adafruit-blinka                  # board/busio backing for CircuitPython libs
-lgpio                            # GPIO backend Blinka uses on the Pi 5
+# Hardware (Pi 5) — safe to omit when developing off-Pi.
+# The PCA9685 is driven directly over I2C via smbus2 (see hardware.py) — NO Adafruit
+# Blinka / lgpio, on purpose: Blinka's Pi-5 gpiochip detection breaks when a second
+# i2c-gpio bus (the enviro sensor) is present.
+smbus2                           # raw I2C access (PCA9685 + the sensor)
 
 # Environmental watchdog — Pimoroni Multi-Sensor Stick (I2C)
 pimoroni-bme280                  # BME280 temp/pressure/humidity  (NOT the generic 'bme280'!)
 ltr559                           # LTR-559 light + proximity
 lsm6ds3                          # LSM6DS3 accel + gyro
-smbus2                           # raw I2C access
 
 # picamera2 is NOT pip-installed here — install via apt on the Pi:
 #   sudo apt install -y python3-picamera2

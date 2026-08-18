@@ -16,9 +16,11 @@ PCA9685_PWM_FREQ_HZ = 1000   # carrier: high enough to be flicker-free on camera
 # Environmental watchdog — Pimoroni Multi-Sensor Stick (BME280 0x76, LTR-559 0x23,
 # LSM6DS3 0x6a). Shares the SAME I2C bus as the PCA9685 (no extra GPIO, no address clash).
 # ---------------------------------------------------------------------------
-SENSOR_I2C_BUS = 3           # dedicated i2c-gpio bus on pins 16/18 (SDA=GPIO23, SCL=GPIO24);
-                             # set to 1 to share the PCA9685 bus instead. Enable bus 3 with:
+SENSOR_I2C_BUS = 3           # dedicated i2c-gpio bus on pins 16/18 (SDA=GPIO23, SCL=GPIO24),
+                             # separate from the PCA9685's bus 1. Safe now that the PCA9685
+                             # uses a direct smbus2 driver (no Blinka/gpiochip). Enable with:
                              #   dtoverlay=i2c-gpio,i2c_gpio_sda=23,i2c_gpio_scl=24,bus=3
+                             # (set to 1 to share the PCA9685 bus instead.)
 ENVIRO_POLL_S = 2.0          # how often to sample the sensors (seconds)
 TEMP_BAND_C = (20.0, 28.0)   # flag temperature outside this band (°C)
 HUM_BAND_PCT = (40.0, 80.0)  # flag humidity outside this band (%)
